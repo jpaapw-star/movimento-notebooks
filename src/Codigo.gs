@@ -191,7 +191,8 @@ function montarPlano_(planilhas, meses) {
     if (!ehNotebook_(marca, modelo, desc)) { plano.naoNotebook++; return; }
     const serial = String(l[iSerial] || '').trim();
     if (!normSerial_(serial)) { plano.semSerial++; return; }
-    const data = lerData_(l[iData]);
+    // A data às vezes cai na coluna seguinte (NOTA FINAL): procura ali e depois no resto da linha
+    const data = lerData_(l[iData]) || lerData_(l[iData + 1]) || l.map(lerData_).find(Boolean) || null;
     if (!data) { plano.semData++; return; }
     itens.push({ marca: marcaFinal_(marca, desc), modelo, serial, data });
   });
@@ -367,7 +368,11 @@ const PAINEL_HTML = `<!doctype html>
   };
   $('auto').onchange = () => {
     $('auto').disabled = true;
-    google.script.run.withSuccessHandler(v => { $('auto').checked = v; $('auto').disabled = false; })
+    $('msg').textContent = $('auto').checked ? 'Ligando o automático…' : 'Desligando…';
+    google.script.run.withSuccessHandler(v => {
+      $('auto').checked = v; $('auto').disabled = false;
+      $('msg').textContent = v ? 'Automático ligado.' : 'Automático desligado.';
+    })
       .withFailureHandler(e => { $('msg').textContent = e.message; $('auto').disabled = false; })
       .painelAuto($('auto').checked);
   };
