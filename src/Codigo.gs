@@ -88,7 +88,8 @@ function painelDados() {
   const meses = Object.keys(plano.resumo)
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
     .map(nome => ({ nome, total: plano.resumo[nome].total, feitos: plano.resumo[nome].feitos }));
-  return { meses, auto: triggerAuto_() !== null, url: abrirSimulacao_().getUrl() };
+  return { meses, auto: triggerAuto_() !== null, url: abrirSimulacao_().getUrl(),
+    ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null') };
 }
 
 // Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
@@ -96,7 +97,8 @@ function painelGerar(mes) {
   const props = props_();
   const seguidos = JSON.parse(props.getProperty('MESES_AUTO') || '[]');
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
-  const n = gerar_([mes]);
+  const n = gerar_([mes], false);
+  if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
   return n ? n + ' notebooks sorteados em ' + mes + '.' : 'Nada novo em ' + mes + ': já está na metade.';
 }
 
@@ -112,24 +114,60 @@ function automatico() {
   const hoje = new Date();
   const atual = MESES[hoje.getMonth()] + ' ' + hoje.getFullYear();
   const seguidos = JSON.parse(props_().getProperty('MESES_AUTO') || '[]');
-  gerar_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos);
+  try {
+    gerar_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos, true);
+  } catch (e) {
+    // Fica registrado no painel; o erro segue para o Google avisar por e-mail
+    registrarRodada_(0, e.message);
+    throw e;
+  }
 }
 
-function gerar_(meses) {
+// Devolve quantos foram sorteados, ou -1 se outra rodada estava em andamento.
+// pularSeIgual: no automático, não refaz o trabalho se nada mudou desde a última rodada.
+function gerar_(meses, pularSeIgual) {
   const trava = LockService.getScriptLock();
-  if (!trava.tryLock(30000)) return 0;
+  if (!trava.tryLock(30000)) return -1;
   try {
     const simulacao = abrirSimulacao_();
-    const plano = montarPlano_([planilhaManutencoes_(), simulacao], meses);
+    const origem = lerOrigem_();
+    const assinatura = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,
+      JSON.stringify(origem) + '|' + meses.join(',') + '|' + simulacao.getSheets().map(a => a.getLastRow()).join(',')));
+    if (pularSeIgual && props_().getProperty('ASSINATURA') === assinatura) return 0;
+
+    const plano = montarPlano_([planilhaManutencoes_(), simulacao], meses, origem);
     let n = 0;
     Object.keys(plano.porAba).forEach(nome => {
       gravarNaAba_(abaSimulacao_(simulacao, nome), plano.porAba[nome]);
       n += plano.porAba[nome].length;
     });
+    if (!n) props_().setProperty('ASSINATURA', assinatura);
+    registrarRodada_(n, '');
     return n;
   } finally {
     trava.releaseLock();
   }
+}
+
+function registrarRodada_(n, erro) {
+  props_().setProperty('ULTIMA_RODADA', JSON.stringify({
+    quando: Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'dd/MM HH:mm'), n, erro }));
+}
+
+// Lê a aba da planilha de qualidade e confere se as colunas necessárias existem
+function lerOrigem_() {
+  let aba;
+  try {
+    aba = SpreadsheetApp.openById(ORIGEM_ID).getSheetByName(ORIGEM_ABA);
+  } catch (e) {
+    throw new Error('Não consegui abrir a planilha de qualidade. Confira se você ainda tem acesso a ela.');
+  }
+  if (!aba) throw new Error('A aba "' + ORIGEM_ABA + '" não existe mais na planilha de qualidade.');
+  const dados = aba.getDataRange().getValues();
+  const cab = dados[0].map(c => String(c).trim().toUpperCase());
+  const faltam = ['MARCA', 'MODELO', 'SERIAL', 'DATA', 'DESCRIÇÃO'].filter(c => cab.indexOf(c) < 0);
+  if (faltam.length) throw new Error('Na planilha de qualidade sumiu a coluna: ' + faltam.join(', ') + '.');
+  return dados;
 }
 
 function triggerAuto_() {
@@ -145,7 +183,11 @@ function abrirSimulacao_() {
     if (id) props.setProperty('SIMULACAO_ID', id);
   }
   if (id) {
-    try { return SpreadsheetApp.openById(id); } catch (e) { /* apagada: cria outra */ }
+    // Não cria outra em caso de falha passageira: isso faria sortear tudo de novo
+    try { return SpreadsheetApp.openById(id); } catch (e) {
+      throw new Error('Não consegui abrir a planilha da simulação. Se ela foi apagada de vez, ' +
+        'restaure da lixeira do Google Drive.');
+    }
   }
   const nova = SpreadsheetApp.create(SIMULACAO_NOME);
   props.setProperty('SIMULACAO_ID', nova.getId());
@@ -164,7 +206,7 @@ function abaSimulacao_(planilha, nome) {
 }
 
 // meses: lista de abas para sortear ([] = só calcula o resumo, sem sortear)
-function montarPlano_(planilhas, meses) {
+function montarPlano_(planilhas, meses, origem) {
   const existentes = new Set(), naSimulacao = new Set();
   planilhas.forEach((p, n) => p.getSheets().forEach(aba => {
     const col = colunas_(aba);
@@ -176,8 +218,7 @@ function montarPlano_(planilhas, meses) {
       });
   }));
 
-  const dados = SpreadsheetApp.openById(ORIGEM_ID).getSheetByName(ORIGEM_ABA)
-    .getDataRange().getValues();
+  const dados = origem || lerOrigem_();
   const cab = dados[0].map(c => String(c).trim().toUpperCase());
   const iMarca = cab.indexOf('MARCA'), iModelo = cab.indexOf('MODELO'), iSerial = cab.indexOf('SERIAL'),
     iData = cab.indexOf('DATA'), iDesc = cab.indexOf('DESCRIÇÃO');
@@ -238,7 +279,12 @@ function montarPlano_(planilhas, meses) {
 }
 
 function gravarNaAba_(aba, itens) {
-  const col = colunas_(aba);
+  let col = colunas_(aba);
+  if ([col.tecnico, col.marca, col.modelo, col.serial, col.data, col.desc].some(i => i < 0)) {
+    // Cabeçalho apagado ou trocado à mão: recoloca o padrão na linha 1
+    aba.getRange(1, 1, 1, SIMULACAO_CAB.length).setValues([SIMULACAO_CAB]).setFontWeight('bold');
+    col = colunas_(aba);
+  }
   const largura = Math.max(col.tecnico, col.marca, col.modelo, col.serial, col.data, col.desc) + 1;
   const ultima = ultimaLinhaComDados_(aba, largura);
   const valores = itens.map(it => {
@@ -306,14 +352,25 @@ function marcaFinal_(marca, desc) {
   return achada || m;
 }
 
+// Aceita data do Sheets, "dd/mm/aaaa" ou "aaaa-mm-dd"; recusa data impossível ou no futuro
 function lerData_(v) {
-  if (v instanceof Date && !isNaN(v)) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
-  const m = String(v || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null;
+  let d = null;
+  if (v instanceof Date && !isNaN(v)) d = new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  else {
+    const t = String(v || '');
+    let m = t.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
+    if (m) d = new Date(+m[3], +m[2] - 1, +m[1]);
+    else if ((m = t.match(/\b(\d{4})-(\d{2})-(\d{2})\b/))) d = new Date(+m[1], +m[2] - 1, +m[3]);
+  }
+  if (!d || isNaN(d)) return null;
+  const amanha = new Date(Date.now() + 864e5);
+  return d.getFullYear() >= 2024 && d <= amanha ? d : null;
 }
 
+// Serial só com letras e números; "N/A", "sem serial", "0" e parecidos contam como vazio
 function normSerial_(s) {
-  return String(s || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  const n = String(s || '').normalize('NFD').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+  return n.length < 4 || /^(SEMSERIAL|NAOENCONTRADO|NAOTEM|NAOPOSSUI|0+)$/.test(n) ? '' : n;
 }
 
 const PAINEL_HTML = `<!doctype html>
@@ -348,6 +405,7 @@ const PAINEL_HTML = `<!doctype html>
   <div class="suave" id="msg"></div>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
   <div class="suave">A cada 10 minutos sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
+  <div class="suave" id="ultima"></div>
   <div class="suave"><a id="link" href="#" target="_blank" hidden>Abrir planilha da simulação</a></div>
 <script>
   const $ = id => document.getElementById(id);
@@ -357,6 +415,9 @@ const PAINEL_HTML = `<!doctype html>
         '<option value="' + m.nome + '">' + m.nome + ' · ' + m.feitos + ' de ' + m.total + '</option>').join('');
       $('auto').checked = d.auto; $('auto').disabled = false; $('gerar').disabled = !d.meses.length;
       $('link').href = d.url; $('link').hidden = false;
+      const u = d.ultima;
+      $('ultima').textContent = !u ? '' : 'Última rodada: ' + u.quando + ' · ' +
+        (u.erro ? 'erro: ' + u.erro : u.n + ' sorteados');
     }).withFailureHandler(e => $('msg').textContent = e.message).painelDados();
   }
   $('gerar').onclick = () => {
