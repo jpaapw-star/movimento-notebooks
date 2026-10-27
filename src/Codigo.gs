@@ -93,7 +93,8 @@ function painelDados() {
     .map(nome => ({ nome, total: plano.resumo[nome].total, feitos: plano.resumo[nome].feitos }));
   return { meses, auto: triggerAuto_() !== null, url: abrirSimulacao_().getUrl(),
     ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null'),
-    scan: JSON.parse(props_().getProperty('RESUMO_SCAN') || 'null'), memoria: !!chaveMG_() };
+    scan: JSON.parse(props_().getProperty('RESUMO_SCAN') || 'null'), memoria: !!chaveMG_(),
+    erroMg: props_().getProperty('ERRO_MG') || '' };
 }
 
 // Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
@@ -103,8 +104,13 @@ function painelGerar(mes) {
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
   const n = gerar_([mes], false);
   if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
-  conferirScan_([mes]);
-  return n ? n + ' notebooks sorteados em ' + mes + '.' : 'Nada novo em ' + mes + ': já está na metade.';
+  let aviso = '';
+  try {
+    conferirScan_([mes]);
+  } catch (e) {
+    aviso = ' A conferência SCAN falhou e tenta de novo na próxima rodada.';
+  }
+  return (n ? n + ' notebooks sorteados em ' + mes + '.' : 'Nada novo em ' + mes + ': já está na metade.') + aviso;
 }
 
 function painelAuto(ligar) {
@@ -501,6 +507,7 @@ const PAINEL_HTML = `<!doctype html>
         (u.erro ? 'erro: ' + u.erro : u.n + ' sorteados');
       const c = d.scan;
       $('scan').textContent = !d.memoria ? 'Memória Global: falta a chave (marca/modelo e SCAN desligados).' :
+        d.erroMg ? 'Memória Global não respondeu: ' + d.erroMg :
         !c ? '' : 'Conferência SCAN: ' + c.ok + ' ok · ' + c.conferir + ' para conferir · ' + c.fora + ' não passaram pelo SCAN';
     }).withFailureHandler(e => $('msg').textContent = e.message).painelDados();
   }
