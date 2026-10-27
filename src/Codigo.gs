@@ -92,7 +92,8 @@ function painelDados() {
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
     .map(nome => ({ nome, total: plano.resumo[nome].total, feitos: plano.resumo[nome].feitos }));
   return { meses, auto: triggerAuto_() !== null, url: abrirSimulacao_().getUrl(),
-    ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null') };
+    ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null'),
+    scan: JSON.parse(props_().getProperty('RESUMO_SCAN') || 'null'), memoria: !!chaveMG_() };
 }
 
 // Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
@@ -102,6 +103,7 @@ function painelGerar(mes) {
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
   const n = gerar_([mes], false);
   if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
+  conferirScan_([mes]);
   return n ? n + ' notebooks sorteados em ' + mes + '.' : 'Nada novo em ' + mes + ': já está na metade.';
 }
 
@@ -119,6 +121,7 @@ function automatico() {
   const seguidos = JSON.parse(props_().getProperty('MESES_AUTO') || '[]');
   try {
     gerar_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos, true);
+    conferirScan_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos);
   } catch (e) {
     // Fica registrado no painel; o erro segue para o Google avisar por e-mail
     registrarRodada_(0, e.message);
@@ -143,6 +146,7 @@ function gerar_(meses, pularSeIgual) {
     const tocadas = new Set(espelhar_(original, simulacao));
     const plano = montarPlano_([original, simulacao], meses, origem);
     let n = 0;
+    padronizarMarcaModelo_([].concat(...Object.values(plano.porAba)));
     Object.keys(plano.porAba).forEach(nome => {
       gravarNaAba_(abaSimulacao_(simulacao, nome), plano.porAba[nome]);
       n += plano.porAba[nome].length;
@@ -206,20 +210,35 @@ function espelhar_(original, teste) {
       abaTeste.setFrozenRows(1);
     }
     const colOrig = colunas_(abaOrig), colTeste = colunas_(abaTeste);
-    const vistos = new Set();
+    const vistos = new Map();
     if (abaTeste.getLastRow() >= 2) {
-      abaTeste.getRange(2, 1, abaTeste.getLastRow() - 1, Math.max(abaTeste.getLastColumn(), 1)).getValues()
-        .forEach(l => vistos.add(chaveLinha_(l, colTeste)));
+      abaTeste.getRange(2, 1, abaTeste.getLastRow() - 1, largura).getValues()
+        .forEach((l, i) => vistos.set(chaveLinha_(l, colTeste), { linha: i + 2, valores: l }));
     }
-    const novas = dadosOrig.slice(1)
-      .filter(l => l.some(c => String(c).trim() !== '') && !vistos.has(chaveLinha_(l, colOrig)));
+    const novas = [];
+    let editadas = 0;
+    dadosOrig.slice(1).forEach(l => {
+      if (!l.some(c => String(c).trim() !== '')) return;
+      const achada = vistos.get(chaveLinha_(l, colOrig));
+      if (!achada) { novas.push(l); return; }
+      // Colega editou a linha na original (ESTADO, ENTREGUE...): a cópia acompanha
+      if (textoLinha_(achada.valores) !== textoLinha_(l)) {
+        abaTeste.getRange(achada.linha, 1, 1, largura).setValues([l]);
+        editadas++;
+      }
+    });
+    if (editadas) tocadas.push(nome);
     if (!novas.length) return;
     if (abaTeste.getMaxColumns() < largura) abaTeste.insertColumnsAfter(abaTeste.getMaxColumns(), largura - abaTeste.getMaxColumns());
     const ultima = ultimaLinhaComDados_(abaTeste, largura);
     abaTeste.getRange(ultima + 1, 1, novas.length, largura).setValues(novas);
-    tocadas.push(nome);
+    if (tocadas.indexOf(nome) < 0) tocadas.push(nome);
   });
   return tocadas;
+}
+
+function textoLinha_(l) {
+  return l.map(c => c instanceof Date ? c.getTime() : String(c).trim()).join('|');
 }
 
 // Mesmo aparelho na mesma data = mesma linha (assim uma correção de descrição não duplica)
@@ -263,6 +282,7 @@ function montarPlano_(planilhas, meses, origem) {
   const porPlanilha = planilhas.map(p => {
     const set = new Set();
     p.getSheets().forEach(aba => {
+      if (aba.getName() === ABA_SCAN) return; // lista de conferência, não são lançamentos
       const col = colunas_(aba);
       if (col.serial < 0 || aba.getLastRow() < 2) return;
       aba.getRange(2, col.serial + 1, aba.getLastRow() - 1, 1).getValues()
@@ -277,7 +297,7 @@ function montarPlano_(planilhas, meses, origem) {
   const dados = origem || lerOrigem_();
   const cab = dados[0].map(c => String(c).trim().toUpperCase());
   const iMarca = cab.indexOf('MARCA'), iModelo = cab.indexOf('MODELO'), iSerial = cab.indexOf('SERIAL'),
-    iData = cab.indexOf('DATA'), iDesc = cab.indexOf('DESCRIÇÃO');
+    iData = cab.indexOf('DATA'), iDesc = cab.indexOf('DESCRIÇÃO'), iEan = cab.indexOf('EAN');
 
   const plano = { porAba: {}, resumo: {}, jaExiste: 0, repetidos: 0, semData: 0, semSerial: 0, naoNotebook: 0 };
   const itens = [];
@@ -291,7 +311,7 @@ function montarPlano_(planilhas, meses, origem) {
     // A data às vezes cai na coluna seguinte (NOTA FINAL): procura ali e depois no resto da linha
     const data = lerData_(l[iData]) || lerData_(l[iData + 1]) || l.map(lerData_).find(Boolean) || null;
     if (!data) { plano.semData++; return; }
-    itens.push({ marca: marcaFinal_(marca, desc), modelo, serial, data });
+    itens.push({ marca: marcaFinal_(marca, desc), modelo, serial, data, ean: iEan < 0 ? '' : String(l[iEan] || '').trim() });
   });
 
   // Agrupa por mês (um serial conta uma vez por mês)
@@ -311,6 +331,7 @@ function montarPlano_(planilhas, meses, origem) {
     const lista = porMes[nome].lista;
     const feitos = lista.filter(it => naSimulacao.has(normSerial_(it.serial))).length;
     plano.resumo[nome] = { total: lista.length, feitos, ordem: porMes[nome].ordem };
+    (plano.listaMes = plano.listaMes || {})[nome] = lista;
     if (meses.indexOf(nome) < 0) return;
     // Quem já foi sorteado antes conta na metade (rodar de novo não passa da metade)
     const meta = Math.round(lista.length / 2) - feitos;
@@ -465,6 +486,7 @@ const PAINEL_HTML = `<!doctype html>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
   <div class="suave">A cada 10 minutos sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
   <div class="suave" id="ultima"></div>
+  <div class="suave" id="scan"></div>
   <div class="suave"><a id="link" href="#" target="_blank" hidden>Abrir cópia de teste</a></div>
 <script>
   const $ = id => document.getElementById(id);
@@ -477,6 +499,9 @@ const PAINEL_HTML = `<!doctype html>
       const u = d.ultima;
       $('ultima').textContent = !u ? '' : 'Última rodada: ' + u.quando + ' · ' +
         (u.erro ? 'erro: ' + u.erro : u.n + ' sorteados');
+      const c = d.scan;
+      $('scan').textContent = !d.memoria ? 'Memória Global: falta a chave (marca/modelo e SCAN desligados).' :
+        !c ? '' : 'Conferência SCAN: ' + c.ok + ' ok · ' + c.conferir + ' para conferir · ' + c.fora + ' não passaram pelo SCAN';
     }).withFailureHandler(e => $('msg').textContent = e.message).painelDados();
   }
   $('gerar').onclick = () => {

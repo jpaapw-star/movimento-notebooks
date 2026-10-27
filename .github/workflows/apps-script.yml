@@ -1,5 +1,6 @@
 # Envia src/ para o Apps Script e atualiza o app da Web (mesmo link /exec) sempre que a main muda.
 # Configuração única: segredo CLASPRC_JSON (o mesmo .clasprc.json do Produção por voz).
+# Opcional: segredo MG_CHAVE (chave prod_ do app na aba Apps da Memória Global).
 name: Apps Script
 
 on:
@@ -20,14 +21,17 @@ jobs:
         with:
           node-version: 22
       - name: Conferir código
-        run: node -e 'new Function(require("fs").readFileSync("src/Codigo.gs","utf8"))'
+        run: for f in src/*.gs; do node -e 'new Function(require("fs").readFileSync(process.argv[1],"utf8"))' "$f"; done
       - name: Preparar clasp
         env:
           CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          MG_CHAVE: ${{ secrets.MG_CHAVE }}
         run: |
           if [ -z "$CLASPRC_JSON" ]; then echo "::error::Falta o segredo CLASPRC_JSON."; exit 1; fi
           npm install -g @google/clasp@2.4.2
           printf '%s' "$CLASPRC_JSON" > ~/.clasprc.json
+          # Chave da Memória Global (opcional): sem ela, padronização e conferência SCAN ficam desligadas
+          node -e 'require("fs").writeFileSync("src/zz_Segredos.gs", "var SEGREDOS = " + JSON.stringify({ mgChave: (process.env.MG_CHAVE || "").trim() }) + ";\n")'
       - name: Enviar código
         run: clasp push --force
       - name: Atualizar o app da Web
@@ -42,4 +46,4 @@ jobs:
           echo "App da Web: https://script.google.com/macros/s/$DEP/exec" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Apagar credenciais
         if: always()
-        run: rm -f ~/.clasprc.json
+        run: rm -f ~/.clasprc.json src/zz_Segredos.gs
