@@ -1,12 +1,14 @@
 /**
  * Transportar notebooks
  * Lê os notebooks da planilha "CONTROLE DE QUALIDADE INFORMATICA EMANX"
- * (aba TabelaQualidade) e grava uma SIMULAÇÃO numa planilha nova separada
- * ("SIMULAÇÃO - Manutenções notebooks"), uma aba por mês (ex.: "OUTUBRO 2026").
- * A planilha onde o script está instalado só é lida, nunca alterada.
+ * (aba TabelaQualidade) e grava na CÓPIA DE TESTE das manutenções (TESTE_ID),
+ * nas abas de mês (ex.: "OUTUBRO 2026"), sempre em ordem de data.
+ * Cópia viva: as linhas que os colegas lançam na planilha de manutenções original
+ * são copiadas para a cópia de teste a cada rodada.
+ * A planilha de qualidade e a de manutenções original só são lidas, nunca alteradas.
  *
  * - Por mês: sorteia metade dos notebooks lançados naquele mês
- * - Nunca escolhe serial que já existe nesta planilha ou na simulação
+ * - Nunca escolhe serial que já existe na planilha original ou na cópia de teste
  * - Técnico: JOÃO PEDRO
  * - Descrição: sorteada com pesos (troca de tela sai pouco)
  * - Pula linhas sem data ou sem serial, e o que não é notebook (monitor, console, controle...)
@@ -20,7 +22,8 @@ const ORIGEM_ID = '1JHONHaipHAKmtkcQ_7mm8VXA-h-LBQuu-I8uzPhjgDQ';
 const ORIGEM_ABA = 'TabelaQualidade';
 const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
 const TECNICO = 'JOÃO PEDRO';
-const SIMULACAO_NOME = 'SIMULAÇÃO - Manutenções notebooks';
+// Cópia de teste (do João): única planilha onde o app grava
+const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
 const SIMULACAO_CAB = ['TÉCNICO', 'MARCA', 'MODELO', 'SERIAL', 'DATA', 'DESCRIÇÃO'];
 
 // [descrição, peso]: peso maior sai mais vezes
@@ -89,7 +92,8 @@ function painelDados() {
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
     .map(nome => ({ nome, total: plano.resumo[nome].total, feitos: plano.resumo[nome].feitos }));
   return { meses, auto: triggerAuto_() !== null, url: abrirSimulacao_().getUrl(),
-    ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null') };
+    ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null'),
+    scan: JSON.parse(props_().getProperty('RESUMO_SCAN') || 'null'), memoria: !!chaveMG_() };
 }
 
 // Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
@@ -99,6 +103,7 @@ function painelGerar(mes) {
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
   const n = gerar_([mes], false);
   if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
+  conferirScan_([mes]);
   return n ? n + ' notebooks sorteados em ' + mes + '.' : 'Nada novo em ' + mes + ': já está na metade.';
 }
 
@@ -116,6 +121,7 @@ function automatico() {
   const seguidos = JSON.parse(props_().getProperty('MESES_AUTO') || '[]');
   try {
     gerar_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos, true);
+    conferirScan_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos);
   } catch (e) {
     // Fica registrado no painel; o erro segue para o Google avisar por e-mail
     registrarRodada_(0, e.message);
@@ -130,18 +136,24 @@ function gerar_(meses, pularSeIgual) {
   if (!trava.tryLock(30000)) return -1;
   try {
     const simulacao = abrirSimulacao_();
+    const original = planilhaManutencoes_();
     const origem = lerOrigem_();
+    const linhas = p => p.getSheets().map(a => a.getLastRow()).join(',');
     const assinatura = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,
-      JSON.stringify(origem) + '|' + meses.join(',') + '|' + simulacao.getSheets().map(a => a.getLastRow()).join(',')));
+      JSON.stringify(origem) + '|' + meses.join(',') + '|' + linhas(original) + '|' + linhas(simulacao)));
     if (pularSeIgual && props_().getProperty('ASSINATURA') === assinatura) return 0;
 
-    const plano = montarPlano_([planilhaManutencoes_(), simulacao], meses, origem);
+    const tocadas = new Set(espelhar_(original, simulacao));
+    const plano = montarPlano_([original, simulacao], meses, origem);
     let n = 0;
+    padronizarMarcaModelo_([].concat(...Object.values(plano.porAba)));
     Object.keys(plano.porAba).forEach(nome => {
       gravarNaAba_(abaSimulacao_(simulacao, nome), plano.porAba[nome]);
       n += plano.porAba[nome].length;
+      tocadas.add(nome);
     });
-    if (!n) props_().setProperty('ASSINATURA', assinatura);
+    tocadas.forEach(nome => ordenarPorData_(simulacao.getSheetByName(nome)));
+    if (!n && !tocadas.size) props_().setProperty('ASSINATURA', assinatura);
     registrarRodada_(n, '');
     return n;
   } finally {
@@ -175,23 +187,82 @@ function triggerAuto_() {
 }
 
 function abrirSimulacao_() {
-  const props = props_();
-  let id = props.getProperty('SIMULACAO_ID');
-  if (!id) {
-    // versão anterior guardava nas propriedades do documento
-    try { id = PropertiesService.getDocumentProperties().getProperty('SIMULACAO_ID'); } catch (e) { /* app web */ }
-    if (id) props.setProperty('SIMULACAO_ID', id);
+  try {
+    return SpreadsheetApp.openById(TESTE_ID);
+  } catch (e) {
+    throw new Error('Não consegui abrir a cópia de teste. Confira se ela existe e está na sua conta.');
   }
-  if (id) {
-    // Não cria outra em caso de falha passageira: isso faria sortear tudo de novo
-    try { return SpreadsheetApp.openById(id); } catch (e) {
-      throw new Error('Não consegui abrir a planilha da simulação. Se ela foi apagada de vez, ' +
-        'restaure da lixeira do Google Drive.');
+}
+
+// Copia para a cópia de teste as linhas novas das abas de mês da planilha original.
+// Devolve os nomes das abas que receberam linhas.
+function espelhar_(original, teste) {
+  const tocadas = [];
+  original.getSheets().forEach(abaOrig => {
+    const nome = abaOrig.getName();
+    if (!ehAbaDeMes_(nome) || abaOrig.getLastRow() < 2) return;
+    const largura = abaOrig.getLastColumn();
+    const dadosOrig = abaOrig.getRange(1, 1, abaOrig.getLastRow(), largura).getValues();
+    let abaTeste = teste.getSheetByName(nome);
+    if (!abaTeste) {
+      abaTeste = teste.insertSheet(nome);
+      abaTeste.getRange(1, 1, 1, largura).setValues([dadosOrig[0]]).setFontWeight('bold');
+      abaTeste.setFrozenRows(1);
     }
-  }
-  const nova = SpreadsheetApp.create(SIMULACAO_NOME);
-  props.setProperty('SIMULACAO_ID', nova.getId());
-  return nova;
+    const colOrig = colunas_(abaOrig), colTeste = colunas_(abaTeste);
+    const vistos = new Map();
+    if (abaTeste.getLastRow() >= 2) {
+      abaTeste.getRange(2, 1, abaTeste.getLastRow() - 1, largura).getValues()
+        .forEach((l, i) => vistos.set(chaveLinha_(l, colTeste), { linha: i + 2, valores: l }));
+    }
+    const novas = [];
+    let editadas = 0;
+    dadosOrig.slice(1).forEach(l => {
+      if (!l.some(c => String(c).trim() !== '')) return;
+      const achada = vistos.get(chaveLinha_(l, colOrig));
+      if (!achada) { novas.push(l); return; }
+      // Colega editou a linha na original (ESTADO, ENTREGUE...): a cópia acompanha
+      if (textoLinha_(achada.valores) !== textoLinha_(l)) {
+        abaTeste.getRange(achada.linha, 1, 1, largura).setValues([l]);
+        editadas++;
+      }
+    });
+    if (editadas) tocadas.push(nome);
+    if (!novas.length) return;
+    if (abaTeste.getMaxColumns() < largura) abaTeste.insertColumnsAfter(abaTeste.getMaxColumns(), largura - abaTeste.getMaxColumns());
+    const ultima = ultimaLinhaComDados_(abaTeste, largura);
+    abaTeste.getRange(ultima + 1, 1, novas.length, largura).setValues(novas);
+    if (tocadas.indexOf(nome) < 0) tocadas.push(nome);
+  });
+  return tocadas;
+}
+
+function textoLinha_(l) {
+  return l.map(c => c instanceof Date ? c.getTime() : String(c).trim()).join('|');
+}
+
+// Mesmo aparelho na mesma data = mesma linha (assim uma correção de descrição não duplica)
+function chaveLinha_(l, col) {
+  const txt = i => (i < 0 ? '' : l[i] instanceof Date ?
+    Utilities.formatDate(l[i], 'America/Sao_Paulo', 'yyyy-MM-dd') : String(l[i]).trim().toUpperCase());
+  const serial = normSerial_(col.serial < 0 ? '' : l[col.serial]);
+  return serial ? serial + '|' + txt(col.data) :
+    [col.tecnico, col.marca, col.modelo, col.serial, col.data, col.desc].map(txt).join('|');
+}
+
+function ehAbaDeMes_(nome) {
+  const m = String(nome).trim().toUpperCase().match(/^(\S+) (\d{4})$/);
+  return !!m && MESES.indexOf(m[1]) >= 0;
+}
+
+// Ordena as linhas da aba pela coluna DATA (cabeçalho fica na linha 1)
+function ordenarPorData_(aba) {
+  const col = colunas_(aba);
+  if (col.data < 0) return;
+  const largura = aba.getLastColumn();
+  const ultima = ultimaLinhaComDados_(aba, largura);
+  if (ultima < 3) return;
+  aba.getRange(2, 1, ultima - 1, largura).sort({ column: col.data + 1, ascending: true });
 }
 
 function abaSimulacao_(planilha, nome) {
@@ -207,21 +278,26 @@ function abaSimulacao_(planilha, nome) {
 
 // meses: lista de abas para sortear ([] = só calcula o resumo, sem sortear)
 function montarPlano_(planilhas, meses, origem) {
-  const existentes = new Set(), naSimulacao = new Set();
-  planilhas.forEach((p, n) => p.getSheets().forEach(aba => {
-    const col = colunas_(aba);
-    if (col.serial < 0 || aba.getLastRow() < 2) return;
-    aba.getRange(2, col.serial + 1, aba.getLastRow() - 1, 1).getValues()
-      .forEach(l => {
-        const s = normSerial_(l[0]);
-        if (s) { existentes.add(s); if (n === planilhas.length - 1) naSimulacao.add(s); }
-      });
-  }));
+  // planilhas = [original, teste]. Sorteados = seriais da cópia de teste que não estão na original.
+  const porPlanilha = planilhas.map(p => {
+    const set = new Set();
+    p.getSheets().forEach(aba => {
+      if (aba.getName() === ABA_SCAN) return; // lista de conferência, não são lançamentos
+      const col = colunas_(aba);
+      if (col.serial < 0 || aba.getLastRow() < 2) return;
+      aba.getRange(2, col.serial + 1, aba.getLastRow() - 1, 1).getValues()
+        .forEach(l => { const s = normSerial_(l[0]); if (s) set.add(s); });
+    });
+    return set;
+  });
+  const existentes = new Set();
+  porPlanilha.forEach(set => set.forEach(s => existentes.add(s)));
+  const naSimulacao = new Set([...porPlanilha[porPlanilha.length - 1]].filter(s => !porPlanilha[0].has(s)));
 
   const dados = origem || lerOrigem_();
   const cab = dados[0].map(c => String(c).trim().toUpperCase());
   const iMarca = cab.indexOf('MARCA'), iModelo = cab.indexOf('MODELO'), iSerial = cab.indexOf('SERIAL'),
-    iData = cab.indexOf('DATA'), iDesc = cab.indexOf('DESCRIÇÃO');
+    iData = cab.indexOf('DATA'), iDesc = cab.indexOf('DESCRIÇÃO'), iEan = cab.indexOf('EAN');
 
   const plano = { porAba: {}, resumo: {}, jaExiste: 0, repetidos: 0, semData: 0, semSerial: 0, naoNotebook: 0 };
   const itens = [];
@@ -235,7 +311,7 @@ function montarPlano_(planilhas, meses, origem) {
     // A data às vezes cai na coluna seguinte (NOTA FINAL): procura ali e depois no resto da linha
     const data = lerData_(l[iData]) || lerData_(l[iData + 1]) || l.map(lerData_).find(Boolean) || null;
     if (!data) { plano.semData++; return; }
-    itens.push({ marca: marcaFinal_(marca, desc), modelo, serial, data });
+    itens.push({ marca: marcaFinal_(marca, desc), modelo, serial, data, ean: iEan < 0 ? '' : String(l[iEan] || '').trim() });
   });
 
   // Agrupa por mês (um serial conta uma vez por mês)
@@ -255,6 +331,7 @@ function montarPlano_(planilhas, meses, origem) {
     const lista = porMes[nome].lista;
     const feitos = lista.filter(it => naSimulacao.has(normSerial_(it.serial))).length;
     plano.resumo[nome] = { total: lista.length, feitos, ordem: porMes[nome].ordem };
+    (plano.listaMes = plano.listaMes || {})[nome] = lista;
     if (meses.indexOf(nome) < 0) return;
     // Quem já foi sorteado antes conta na metade (rodar de novo não passa da metade)
     const meta = Math.round(lista.length / 2) - feitos;
@@ -281,7 +358,10 @@ function montarPlano_(planilhas, meses, origem) {
 function gravarNaAba_(aba, itens) {
   let col = colunas_(aba);
   if ([col.tecnico, col.marca, col.modelo, col.serial, col.data, col.desc].some(i => i < 0)) {
-    // Cabeçalho apagado ou trocado à mão: recoloca o padrão na linha 1
+    // Cabeçalho apagado: recoloca o padrão. Cabeçalho diferente: não mexe, só avisa.
+    if (aba.getRange(1, 1, 1, Math.max(aba.getLastColumn(), 1)).getValues()[0].some(c => String(c).trim())) {
+      throw new Error('Na aba "' + aba.getName() + '" falta uma das colunas TÉCNICO, MARCA, MODELO, SÉRIE, DATA ou DESCRIÇÃO.');
+    }
     aba.getRange(1, 1, 1, SIMULACAO_CAB.length).setValues([SIMULACAO_CAB]).setFontWeight('bold');
     col = colunas_(aba);
   }
@@ -406,7 +486,8 @@ const PAINEL_HTML = `<!doctype html>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
   <div class="suave">A cada 10 minutos sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
   <div class="suave" id="ultima"></div>
-  <div class="suave"><a id="link" href="#" target="_blank" hidden>Abrir planilha da simulação</a></div>
+  <div class="suave" id="scan"></div>
+  <div class="suave"><a id="link" href="#" target="_blank" hidden>Abrir cópia de teste</a></div>
 <script>
   const $ = id => document.getElementById(id);
   function carregar() {
@@ -418,6 +499,9 @@ const PAINEL_HTML = `<!doctype html>
       const u = d.ultima;
       $('ultima').textContent = !u ? '' : 'Última rodada: ' + u.quando + ' · ' +
         (u.erro ? 'erro: ' + u.erro : u.n + ' sorteados');
+      const c = d.scan;
+      $('scan').textContent = !d.memoria ? 'Memória Global: falta a chave (marca/modelo e SCAN desligados).' :
+        !c ? '' : 'Conferência SCAN: ' + c.ok + ' ok · ' + c.conferir + ' para conferir · ' + c.fora + ' não passaram pelo SCAN';
     }).withFailureHandler(e => $('msg').textContent = e.message).painelDados();
   }
   $('gerar').onclick = () => {
