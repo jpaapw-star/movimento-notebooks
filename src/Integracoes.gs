@@ -9,6 +9,7 @@ const MG_URL = 'https://script.google.com/macros/s/AKfycbzL7PBVhj04P720XeUq3bvam
 const ABA_SCAN = 'CONFERÊNCIA SCAN';
 const CAB_SCAN = ['SERIAL', 'MARCA', 'MODELO', 'EAN', 'DATA', 'SITUAÇÃO', 'CONFERIDO EM'];
 const SCAN_POR_RODADA = 120;
+const MG_POR_VEZ = 10; // consultas em paralelo (mais que isso a porta recusa por excesso)
 
 // Nomes de fábrica que aparecem de vários jeitos
 const MARCAS_IGUAIS = {
@@ -34,8 +35,9 @@ function consultarMG_(itens) {
     if (c) res[s] = JSON.parse(c); else { res[s] = null; faltam.push(it); }
   });
   if (!chave || !faltam.length) return res;
-  for (let i = 0; i < faltam.length; i += 25) {
-    const lote = faltam.slice(i, i + 25);
+  let erro = '';
+  for (let i = 0; i < faltam.length; i += MG_POR_VEZ) {
+    const lote = faltam.slice(i, i + MG_POR_VEZ);
     let respostas;
     try {
       respostas = UrlFetchApp.fetchAll(lote.map(it => ({
@@ -46,12 +48,16 @@ function consultarMG_(itens) {
             { tipo: 'SERIAL', valor: it.serial }].filter(Boolean) } })
       })));
     } catch (e) {
-      return res; // memória fora do ar: segue sem ela
+      erro = 'fora do ar'; // memória fora do ar: segue sem ela
+      break;
     }
     respostas.forEach((r, j) => {
       let corpo = null;
       try { corpo = JSON.parse(r.getContentText()); } catch (e) { /* resposta inválida */ }
-      if (!corpo || corpo.ok === false || !Array.isArray(corpo.candidatos)) return;
+      if (!corpo || corpo.ok === false || !Array.isArray(corpo.candidatos)) {
+        erro = corpo && corpo.erro ? corpo.erro.codigo + ': ' + corpo.erro.mensagem : 'resposta inválida (HTTP ' + r.getResponseCode() + ')';
+        return;
+      }
       const achar = tipo => corpo.candidatos.find(c => c.encontrado_por === tipo) || null;
       const resumo = c => c && {
         id: c.item_id, aceita: !!c.pode_aceitar_sozinho,
@@ -63,6 +69,8 @@ function consultarMG_(itens) {
       cache.put('mg:' + s, JSON.stringify(res[s]), 21600);
     });
   }
+  // Fica no painel para dar para saber por que a memória não respondeu
+  if (erro) props_().setProperty('ERRO_MG', erro); else props_().deleteProperty('ERRO_MG');
   return res;
 }
 
@@ -122,9 +130,12 @@ function conferirScan_(meses) {
         const i = onde.get(normSerial_(it.serial));
         if (i === undefined) { onde.set(normSerial_(it.serial), linhas.length); linhas.push(nova); } else linhas[i] = nova;
       });
-      aba.getRange(2, 1, linhas.length, CAB_SCAN.length).setValues(linhas);
-      aba.getRange(2, 5, linhas.length, 1).setNumberFormat('dd/MM/yyyy');
-      aba.getRange(2, 7, linhas.length, 1).setNumberFormat('dd/MM/yyyy HH:mm');
+      // Se a memória não respondeu nenhum, não há nada para gravar
+      if (linhas.length) {
+        aba.getRange(2, 1, linhas.length, CAB_SCAN.length).setValues(linhas);
+        aba.getRange(2, 5, linhas.length, 1).setNumberFormat('dd/MM/yyyy');
+        aba.getRange(2, 7, linhas.length, 1).setNumberFormat('dd/MM/yyyy HH:mm');
+      }
     }
     const conta = t => linhas.filter(l => String(l[5]).indexOf(t) === 0).length;
     props_().setProperty('RESUMO_SCAN', JSON.stringify({ ok: conta('OK'), conferir: conta('CONFERIR'), fora: conta('Não passou') }));
