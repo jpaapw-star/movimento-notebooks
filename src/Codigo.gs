@@ -6,8 +6,15 @@ const ORIGEM_ABA = 'TabelaQualidade';
 // Manutenções original: os lançamentos dos colegas vêm dela (só leitura, nunca alterada)
 const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
 // Cópia de teste: onde o app grava (só nas abas de mês). Pelo painel dá para trocar por outra
-// planilha da mesma conta colando o link; o app lembra a escolha.
+// planilha de uma conta aceita (lista abaixo) colando o link; o app lembra a escolha.
 const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
+// Contas aceitas como dono da planilha de destino (escolhida no painel).
+// Para aceitar outra conta pessoal, acrescente o e-mail na lista, entre aspas e separado por vírgula.
+// A conta dona da planilha de manutenções original nunca é aceita, mesmo se estiver na lista.
+const CONTAS_ACEITAS = [
+  'jpaapw@gmail.com',
+  'jpaapw@gmail.com',
+];
 // ======================================================
 
 /**
@@ -23,7 +30,7 @@ const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
  * - Descrição: sorteada com pesos (troca de tela sai pouco)
  * - Pula linhas sem data ou sem serial, e o que não é notebook (monitor, console, controle...)
  * - Painel (menu Notebooks › Abrir painel): escolher um mês e gerar na hora,
- *   e ligar o modo automático (a cada 10 min sorteia os notebooks novos do mês atual
+ *   e ligar o modo automático (2 vezes por dia, a cada 12 h, sorteia os notebooks novos do mês atual
  *   e dos meses já gerados, sempre mantendo metade)
  * - App web: o mesmo painel em tela cheia
  */
@@ -92,6 +99,7 @@ function props_() {
 
 // Chamado pelo painel: lista dos meses e estado do automático
 function painelDados() {
+  ajustarTriggerAuto_();
   const plano = montarPlano_([planilhaManutencoes_(), abrirSimulacao_()], []);
   const meses = Object.keys(plano.resumo)
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
@@ -118,11 +126,12 @@ function painelDestino(link) {
   } catch (e) {
     throw new Error('Não consegui abrir essa planilha. Confira o link e se você tem acesso a ela.');
   }
-  // Só planilhas da mesma conta da cópia de teste (cópias suas), nunca planilhas de outras pessoas
+  // Só planilhas de contas da lista CONTAS_ACEITAS, e nunca da conta dona da original
   const dono = p => { try { const u = p.getOwner(); return u ? u.getEmail().toLowerCase() : ''; } catch (e) { return ''; } };
-  const meu = dono(SpreadsheetApp.openById(TESTE_ID));
-  if (!meu || dono(nova) !== meu) {
-    throw new Error('Essa planilha não é da sua conta. Use uma cópia sua (Arquivo › Fazer uma cópia).');
+  const donoNova = dono(nova);
+  const aceitas = CONTAS_ACEITAS.map(c => String(c).trim().toLowerCase());
+  if (!donoNova || aceitas.indexOf(donoNova) < 0 || donoNova === dono(planilhaManutencoes_())) {
+    throw new Error('Essa planilha não é de uma conta aceita. Use uma cópia sua (Arquivo › Fazer uma cópia).');
   }
   const props = props_();
   if (id === TESTE_ID) props.deleteProperty('DESTINO_ID'); else props.setProperty('DESTINO_ID', id);
@@ -130,11 +139,12 @@ function painelDestino(link) {
   return 'Pronto: o app agora grava em "' + nova.getName() + '".';
 }
 
-// Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
+// Chamado pelo painel: gera um mês na hora, passa a acompanhá-lo e liga o automático
 function painelGerar(mes) {
   const props = props_();
   const seguidos = JSON.parse(props.getProperty('MESES_AUTO') || '[]');
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
+  if (!triggerAuto_()) criarTriggerAuto_(); // sortear liga o automático (2 vezes por dia)
   const n = gerar_([mes], false);
   if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
   let aviso = '';
@@ -148,13 +158,29 @@ function painelGerar(mes) {
 
 function painelAuto(ligar) {
   const t = triggerAuto_();
-  if (ligar && !t) ScriptApp.newTrigger('automatico').timeBased().everyMinutes(10).create();
+  if (ligar && !t) criarTriggerAuto_();
   if (!ligar && t) ScriptApp.deleteTrigger(t);
   return ligar;
 }
 
-// Roda sozinho a cada 10 min: mês atual + meses já gerados
+const AUTO_HORAS = 12; // automático roda 2 vezes por dia
+
+function criarTriggerAuto_() {
+  ScriptApp.newTrigger('automatico').timeBased().everyHours(AUTO_HORAS).create();
+  props_().setProperty('AUTO_HORAS', String(AUTO_HORAS));
+}
+
+// Gatilho criado por versão antiga (a cada 10 min): troca pelo de 12 h
+function ajustarTriggerAuto_() {
+  const t = triggerAuto_();
+  if (!t || props_().getProperty('AUTO_HORAS') === String(AUTO_HORAS)) return;
+  ScriptApp.deleteTrigger(t);
+  criarTriggerAuto_();
+}
+
+// Roda sozinho 2 vezes por dia: mês atual + meses já gerados
 function automatico() {
+  ajustarTriggerAuto_();
   const hoje = new Date();
   const atual = MESES[hoje.getMonth()] + ' ' + hoje.getFullYear();
   const seguidos = JSON.parse(props_().getProperty('MESES_AUTO') || '[]');
@@ -523,7 +549,7 @@ const PAINEL_HTML = `<!doctype html>
   <button id="gerar" disabled>Sortear metade</button>
   <div class="suave" id="msg"></div>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
-  <div class="suave">A cada 10 minutos sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
+  <div class="suave">Duas vezes por dia (a cada 12 horas) sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
   <div class="suave" id="ultima"></div>
   <div class="suave" id="scan"></div>
   <div class="linha"><span>Planilha de destino</span></div>
