@@ -131,11 +131,12 @@ function painelDestino(link) {
   return 'Pronto: o app agora grava em "' + nova.getName() + '".';
 }
 
-// Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
+// Chamado pelo painel: gera um mês na hora, passa a acompanhá-lo e liga o automático
 function painelGerar(mes) {
   const props = props_();
   const seguidos = JSON.parse(props.getProperty('MESES_AUTO') || '[]');
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
+  if (!triggerAuto_()) criarTriggerAuto_(); // sortear liga o automático (2 vezes por dia)
   const n = gerar_([mes], false);
   if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
   let aviso = '';
