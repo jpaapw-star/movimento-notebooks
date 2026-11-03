@@ -321,7 +321,8 @@ teste('Tradução: texto livre antigo conta para o nome oficial, sem cadastrar o
   assert.strictEqual(tr('REPARO WIFI NÃO FUNCIONA E PLACA DE REDE NÃO APARECE NO CMD'), '["REPARO NA INTERFACE DE REDE"]', 'WIFI e REDE são uma coisa só');
   assert.strictEqual(amb.rodar(`interpretarDescricao_('REPARO NA INTERFACE DE WIFI').map(c => c.texto).join()`), 'REPARO NA INTERFACE DE REDE');
   assert.strictEqual(amb.rodar(`interpretarDescricao_('REPARO NA INTERFACE DE VÍDEO, WIFI E REDE').map(c => c.texto).join()`), 'REPARO NA INTERFACE DE VÍDEO,REPARO NA INTERFACE DE REDE');
-  assert.strictEqual(tr('SSD NÃO APARECE NA BIOS'), '["REPARO NA INTERFACE DE INICIALIZAÇÃO"]');
+  assert.strictEqual(tr('SSD NÃO APARECE NA BIOS'), '["REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA"]');
+  assert.strictEqual(tr('REPARO SSD CORROMPIDO E REPARO BIOS'), '["REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA"]', 'inicialização e formatação são uma só');
   assert.strictEqual(tr('TROCA DE BATERIA E SSD'), '["TROCA DE BATERIA","TROCA DE SSD"]');
   assert.strictEqual(tr('WIFI NÃO CONECTA E MICROFONE ESTOURADO'), '["REPARO NA INTERFACE DE REDE","REPARO NA INTERFACE DE ÁUDIO"]');
   assert.strictEqual(tr('TROCA DE TECLADO E FORMATAÇÃO'), 'null', 'parte sem tradução: não traduz');
@@ -334,6 +335,24 @@ teste('Tradução: texto livre antigo conta para o nome oficial, sem cadastrar o
   assert.strictEqual(wifi.freqTraduzida, 1);
   assert.ok(!Object.values(b.itens).some(i => /NAO FUNCIONA|NÃO FUNCIONA/.test(i.desc)), 'texto livre virou cadastro');
   assert.ok(b.traducoes.some(t => t.para === 'REPARO NA INTERFACE DE REDE'));
+});
+
+teste('Inicialização e formatação do sistema são a mesma manutenção', () => {
+  const amb = cenario({ historico: d => [
+    ['A', 'ACER', 'A315', 'H1', d(2026, 1, 5), 'REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA'],
+    ['A', 'ACER', 'A315', 'H2', d(2026, 1, 6), 'FORMATAÇÃO DO SISTEMA'],
+    ['A', 'ACER', 'A315', 'H3', d(2026, 1, 7), 'REPARO NA INTERFACE DE INICIALIZACAO'],
+    ['A', 'ACER', 'A315', 'H4', d(2026, 1, 8), 'FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO']] });
+  const um = amb.rodar(`interpretarDescricao_('REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA').map(c => c.texto)`);
+  igual(um, ['REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA']);
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  const b = banco(amb);
+  const it = b.itens['I:REPARO NA INTERFACE DE INICIALIZACAO E FORMATACAO DO SISTEMA'];
+  assert.strictEqual(it.tipo, 'I');
+  assert.strictEqual(it.freq, 3);
+  assert.ok(!b.itens['I:FORMATACAO DO SISTEMA'] && !b.itens['I:REPARO NA INTERFACE DE INICIALIZACAO'], 'nomes separados');
+  const c = Object.values(b.itens).find(i => i.tipo === 'C' && i.freq === 1);
+  assert.strictEqual(c.desc, 'FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO');
 });
 
 teste('Painel: consulta ao banco e resumo', () => {

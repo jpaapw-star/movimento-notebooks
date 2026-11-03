@@ -28,6 +28,13 @@ const PREFIXOS_COMPLETOS = ['FORMATAÇÃO DO SISTEMA'];
 const PROIBIDAS = /\b(NAO|NN|ERRO|ERROR|DEFEITO|FUNCIONA|FUNCIONANDO|PAROU|APARECE|APARECEM|RECONHECE|RECONHECEM|ESTOURADO|ESTOURA|TRAVADO|TRAVANDO|SEM|COM|PARA|POR)\b|[()\/:;?!+=]|\d/;
 const MAX_PALAVRAS_COMPONENTE = 4;
 const ORIGEM_OFICIAL = 'LISTA OFICIAL DO APP';
+
+// Nomes diferentes para a mesma manutenção: contam e são escritos como um só.
+// emCombinacao: forma curta usada dentro de uma combinação ("FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO").
+const SINONIMOS = [
+  { nomes: ['REPARO NA INTERFACE DE INICIALIZAÇÃO', 'FORMATAÇÃO DO SISTEMA'],
+    oficial: 'REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA', emCombinacao: 'FORMATAÇÃO DO SISTEMA' }
+];
 const ORIGEM_TRADUCAO = 'TRADUÇÃO DO HISTÓRICO';
 const MAX_TRADUCOES = 80; // exemplos de tradução guardados para conferência no painel
 
@@ -93,12 +100,18 @@ function interpretarDescricao_(descricao) {
     const completo = PREFIXOS_COMPLETOS.indexOf(prefixo) >= 0;
     if (completo ? resto : !resto) return null;
     if (resto && (resto.split(' ').length > MAX_PALAVRAS_COMPONENTE || PROIBIDAS.test(semAcento_(resto)))) return null;
-    const texto = resto ? prefixo + ' ' + resto : prefixo;
-    const chave = semAcento_(texto);
-    if (!comps.some(c => c.chave === chave)) comps.push({ chave, texto });
+    const c = componente_(resto ? prefixo + ' ' + resto : prefixo);
+    if (!comps.some(x => x.chave === c.chave)) comps.push(c);
     prefixoAnterior = prefixo;
   }
   return comps.length ? comps : null;
+}
+
+// Um componente { chave, texto } já com os sinônimos trocados pelo nome oficial
+function componente_(texto) {
+  const k = semAcento_(texto);
+  const s = SINONIMOS.find(x => x.nomes.concat(x.oficial).some(n => semAcento_(n) === k));
+  return s ? { chave: semAcento_(s.oficial), texto: s.oficial } : { chave: k, texto };
 }
 
 // Devolve os nomes oficiais de um texto livre antigo, ou null se alguma parte não tiver tradução
@@ -113,7 +126,7 @@ function traduzirDescricao_(descricao) {
     else if (/^(REPARO|RETIRADA|REMOCAO|FORMATACAO|AJUSTE|LIMPEZA|INSTALACAO)\b/.test(parte)) troca = false;
     const achados = TRADUCOES.filter(r => !!r.troca === troca && r.re.test(parte)).map(r => r.nome);
     if (!achados.length) return null;
-    achados.forEach(n => { if (nomes.indexOf(n) < 0) nomes.push(n); });
+    achados.forEach(n => { const o = componente_(n).texto; if (nomes.indexOf(o) < 0) nomes.push(o); });
   }
   return nomes.length ? nomes : null;
 }
@@ -125,7 +138,7 @@ function idCombinacao_(chaves) {
 // Frase com os nomes oficiais: mesmo começo junta ("REPARO NA INTERFACE DE ÁUDIO, VÍDEO E REDE")
 function escreverCombinacao_(textos) {
   const grupos = [];
-  textos.forEach(texto => {
+  textos.map(t => { const s = SINONIMOS.find(x => x.oficial === t); return s ? s.emCombinacao : t; }).forEach(texto => {
     const prefixo = PREFIXOS.find(p => texto === p || texto.indexOf(p + ' ') === 0);
     const resto = prefixo && PREFIXOS_COMPLETOS.indexOf(prefixo) < 0 ? texto.slice(prefixo.length).trim() : '';
     const g = resto && grupos.find(x => x.prefixo === prefixo);
@@ -278,7 +291,7 @@ function montarBanco_(antigo, linhas) {
       // Texto livre antigo: traduz para os nomes oficiais só para contar a frequência
       const nomes = traduzirDescricao_(l.desc);
       if (nomes) {
-        item = cadastrar_(banco, nomes.map(n => ({ chave: semAcento_(n), texto: n })), ORIGEM_TRADUCAO, novos);
+        item = cadastrar_(banco, nomes.map(componente_), ORIGEM_TRADUCAO, novos);
         const k = semAcento_(l.desc);
         traduzidas[k] = traduzidas[k] || { texto: textoOficial_(l.desc), para: item.desc, n: 0 };
         traduzidas[k].n++;
