@@ -10,7 +10,7 @@ const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
 // Para aceitar outra conta pessoal, acrescente o e-mail na lista, entre aspas e separado por vírgula.
 const CONTAS_ACEITAS = [
   'jpaapw@gmail.com',
-  'jpaapw@gmail.com',
+  'emanxti@gmail.com',
 ];
 // ======================================================
 
