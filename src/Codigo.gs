@@ -5,7 +5,8 @@ const ORIGEM_ID = '1JHONHaipHAKmtkcQ_7mm8VXA-h-LBQuu-I8uzPhjgDQ';
 const ORIGEM_ABA = 'TabelaQualidade';
 // Manutenções original: os lançamentos dos colegas vêm dela (só leitura, nunca alterada)
 const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
-// Cópia de teste: única planilha onde o app grava (só nas abas de mês)
+// Cópia de teste: onde o app grava (só nas abas de mês). Pelo painel dá para trocar por outra
+// planilha da mesma conta colando o link; o app lembra a escolha.
 const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
 // ======================================================
 
@@ -95,10 +96,38 @@ function painelDados() {
   const meses = Object.keys(plano.resumo)
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
     .map(nome => ({ nome, total: plano.resumo[nome].total, feitos: plano.resumo[nome].feitos }));
-  return { meses, auto: triggerAuto_() !== null, url: abrirSimulacao_().getUrl(),
+  const destino = abrirSimulacao_();
+  return { meses, auto: triggerAuto_() !== null, url: destino.getUrl(), destino: destino.getName(),
     ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null'),
     scan: JSON.parse(props_().getProperty('RESUMO_SCAN') || 'null'), memoria: !!chaveMG_(),
     erroMg: props_().getProperty('ERRO_MG') || '' };
+}
+
+// Chamado pelo painel: troca a planilha onde o app grava (link ou ID colado pelo usuário)
+function painelDestino(link) {
+  const m = String(link || '').trim().match(/\/d\/([\w-]{20,})/) || String(link || '').trim().match(/^([\w-]{20,})$/);
+  if (!m) throw new Error('Não reconheci o link. Cole o endereço da planilha (docs.google.com/spreadsheets/d/...).');
+  const id = m[1];
+  // A qualidade e a original só são lidas: nunca viram destino
+  if (id === ORIGEM_ID || id === MANUTENCOES_ID) {
+    throw new Error('Essa planilha só é lida pelo app. Escolha uma cópia sua.');
+  }
+  let nova;
+  try {
+    nova = SpreadsheetApp.openById(id);
+  } catch (e) {
+    throw new Error('Não consegui abrir essa planilha. Confira o link e se você tem acesso a ela.');
+  }
+  // Só planilhas da mesma conta da cópia de teste (cópias suas), nunca planilhas de outras pessoas
+  const dono = p => { try { const u = p.getOwner(); return u ? u.getEmail().toLowerCase() : ''; } catch (e) { return ''; } };
+  const meu = dono(SpreadsheetApp.openById(TESTE_ID));
+  if (!meu || dono(nova) !== meu) {
+    throw new Error('Essa planilha não é da sua conta. Use uma cópia sua (Arquivo › Fazer uma cópia).');
+  }
+  const props = props_();
+  if (id === TESTE_ID) props.deleteProperty('DESTINO_ID'); else props.setProperty('DESTINO_ID', id);
+  props.deleteProperty('ASSINATURA'); // próxima rodada trabalha na planilha nova
+  return 'Pronto: o app agora grava em "' + nova.getName() + '".';
 }
 
 // Chamado pelo painel: gera um mês e passa a acompanhá-lo no automático
@@ -198,9 +227,9 @@ function triggerAuto_() {
 
 function abrirSimulacao_() {
   try {
-    return SpreadsheetApp.openById(TESTE_ID);
+    return SpreadsheetApp.openById(props_().getProperty('DESTINO_ID') || TESTE_ID);
   } catch (e) {
-    throw new Error('Não consegui abrir a cópia de teste. Confira se ela existe e está na sua conta.');
+    throw new Error('Não consegui abrir a planilha de destino. Confira se ela existe ou escolha outra no painel.');
   }
 }
 
@@ -473,8 +502,8 @@ const PAINEL_HTML = `<!doctype html>
     font:14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
   h1 { font-size:22px; font-weight:700; margin:0 0 16px; }
   label { display:block; color:var(--suave); font-size:12px; margin-bottom:6px; }
-  select, button { width:100%; box-sizing:border-box; font:inherit; border-radius:10px; padding:10px 12px; }
-  select { background:var(--fundo); color:var(--texto); border:1px solid var(--linha); }
+  select, button, input[type=text] { width:100%; box-sizing:border-box; font:inherit; border-radius:10px; padding:10px 12px; }
+  select, input[type=text] { background:var(--fundo); color:var(--texto); border:1px solid var(--linha); }
   button { margin-top:10px; border:0; background:var(--botao); color:var(--botao-txt); font-weight:600; cursor:pointer; }
   button:disabled { opacity:.4; }
   .linha { display:flex; justify-content:space-between; align-items:center;
@@ -497,7 +526,11 @@ const PAINEL_HTML = `<!doctype html>
   <div class="suave">A cada 10 minutos sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
   <div class="suave" id="ultima"></div>
   <div class="suave" id="scan"></div>
-  <div class="suave"><a id="link" href="#" target="_blank" hidden>Abrir cópia de teste</a></div>
+  <div class="linha"><span>Planilha de destino</span></div>
+  <div class="suave"><a id="link" href="#" target="_blank" hidden></a></div>
+  <input type="text" id="destino" placeholder="Cole o link de outra planilha sua">
+  <button id="trocar">Usar esta planilha</button>
+  <div class="suave" id="msgDestino"></div>
 <script>
   const $ = id => document.getElementById(id);
   function carregar() {
@@ -505,7 +538,7 @@ const PAINEL_HTML = `<!doctype html>
       $('mes').innerHTML = d.meses.map(m =>
         '<option value="' + m.nome + '">' + m.nome + ' · ' + m.feitos + ' de ' + m.total + '</option>').join('');
       $('auto').checked = d.auto; $('auto').disabled = false; $('gerar').disabled = !d.meses.length;
-      $('link').href = d.url; $('link').hidden = false;
+      $('link').href = d.url; $('link').textContent = d.destino; $('link').hidden = false;
       const u = d.ultima;
       $('ultima').textContent = !u ? '' : 'Última rodada: ' + u.quando + ' · ' +
         (u.erro ? 'erro: ' + u.erro : u.n + ' sorteados');
@@ -532,6 +565,14 @@ const PAINEL_HTML = `<!doctype html>
     })
       .withFailureHandler(e => { $('msg').textContent = e.message; $('auto').disabled = false; })
       .painelAuto($('auto').checked);
+  };
+  $('trocar').onclick = () => {
+    $('trocar').disabled = true; $('msgDestino').textContent = 'Conferindo a planilha…';
+    google.script.run.withSuccessHandler(t => {
+      $('msgDestino').textContent = t; $('destino').value = ''; $('trocar').disabled = false; carregar();
+    })
+      .withFailureHandler(e => { $('msgDestino').textContent = e.message; $('trocar').disabled = false; })
+      .painelDestino($('destino').value);
   };
   carregar();
 </script></body></html>`;
