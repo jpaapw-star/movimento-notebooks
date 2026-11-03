@@ -13,6 +13,7 @@ const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
 // A conta dona da planilha de manutenções original nunca é aceita, mesmo se estiver na lista.
 const CONTAS_ACEITAS = [
   'jpaapw@gmail.com',
+  'jpaapw@gmail.com',
 ];
 // ======================================================
 
