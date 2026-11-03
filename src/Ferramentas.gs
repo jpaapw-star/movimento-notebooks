@@ -17,7 +17,7 @@ const ORTOGRAFIA = {
   'CONECTRO': 'CONECTOR', 'TOUCHPED': 'TOUCHPAD', 'TOUCH-PAD': 'TOUCHPAD',
   'WI-FI': 'WIFI', 'WIRELLES': 'WIRELESS', 'SISTEM': 'SISTEMA', 'SITEMA': 'SISTEMA', 'LIMPESA': 'LIMPEZA',
   'INTERFACI': 'INTERFACE',
-  'INTEFACE': 'INTERFACE', 'RAPARO': 'REPARO', 'ESTETICA': 'ESTÉTICA',
+  'INTEFACE': 'INTERFACE', 'ÁUDO': 'ÁUDIO', 'AUDO': 'ÁUDIO', 'SISTMENA': 'SISTEMA', 'CAPTACAO': 'CAPTAÇÃO', 'CAPTAÇAO': 'CAPTAÇÃO', 'ROUCHPAD': 'TOUCHPAD', 'TOCUH': 'TOUCH', 'MOMORIA': 'MEMÓRIA', 'CARÇA': 'CARCAÇA', 'RAPARO': 'REPARO', 'ESTETICA': 'ESTÉTICA',
   'ELETRICA': 'ELÉTRICA', 'TERMICA': 'TÉRMICA', 'PASTA TERMICA': 'PASTA TÉRMICA'
 };
 
@@ -27,8 +27,14 @@ function abaDoMes_(mes) {
   return aba;
 }
 
+// Sem acento, em maiúsculas e com espaços simples (para comparar textos)
 function semAcento_(t) {
-  return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toUpperCase();
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+// Grava os valores corrigidos sem transformar fórmulas em valor fixo: célula com fórmula volta com a fórmula
+function regravarMantendoFormulas_(faixa, valores, formulas) {
+  faixa.setValues(valores.map((l, r) => l.map((c, i) => formulas[r][i] ? formulas[r][i] : c)));
 }
 
 // Chamado pelo painel: descrições repetidas do mês, só nas linhas com o técnico do app
@@ -55,10 +61,10 @@ function painelFormatar(mes) {
     const aba = abaDoMes_(mes), col = colunas_(aba);
     const n = aba.getLastRow() - 1, largura = aba.getLastColumn();
     const faixa = aba.getRange(2, 1, n, largura);
-    const valores = faixa.getValues();
+    const valores = faixa.getValues(), formulas = faixa.getFormulas();
     let mudou = 0;
-    valores.forEach(l => l.forEach((c, i) => {
-      if (typeof c !== 'string') return;
+    valores.forEach((l, r) => l.forEach((c, i) => {
+      if (typeof c !== 'string' || formulas[r][i]) return; // fórmula fica como está
       let novo = c.replace(/\s+/g, ' ').trim();
       if (i === col.tecnico || i === col.marca) novo = novo.toUpperCase();
       if (i === col.marca) novo = MARCAS_IGUAIS[novo] || novo;
@@ -68,7 +74,7 @@ function painelFormatar(mes) {
       }
       if (novo !== c) { l[i] = novo; mudou++; }
     }));
-    if (mudou) faixa.setValues(valores);
+    if (mudou) regravarMantendoFormulas_(faixa, valores, formulas);
     const cab = aba.getRange(1, 1, 1, largura);
     cab.setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
     faixa.setFontWeight('normal').setHorizontalAlignment('center').setVerticalAlignment('middle')
@@ -88,11 +94,11 @@ function painelOrtografia(mes) {
   try {
     const aba = abaDoMes_(mes), col = colunas_(aba);
     const faixa = aba.getRange(2, 1, aba.getLastRow() - 1, aba.getLastColumn());
-    const valores = faixa.getValues();
+    const valores = faixa.getValues(), formulas = faixa.getFormulas();
     const pular = [col.serial, col.modelo, col.data];
     let mudou = 0;
-    valores.forEach(l => l.forEach((c, i) => {
-      if (typeof c !== 'string' || !c.trim() || pular.indexOf(i) >= 0) return;
+    valores.forEach((l, r) => l.forEach((c, i) => {
+      if (typeof c !== 'string' || !c.trim() || pular.indexOf(i) >= 0 || formulas[r][i]) return;
       let novo = c.replace(/[A-Za-zÀ-ÿ-]+/g, p => {
         const certo = ORTOGRAFIA[p.toUpperCase()];
         if (!certo || certo === p.toUpperCase()) return p;
@@ -101,7 +107,7 @@ function painelOrtografia(mes) {
       if (i === col.marca) novo = MARCAS_IGUAIS[novo.toUpperCase()] || novo;
       if (novo !== c) { l[i] = novo; mudou++; }
     }));
-    if (mudou) faixa.setValues(valores);
+    if (mudou) regravarMantendoFormulas_(faixa, valores, formulas);
     return mudou ? 'Ortografia corrigida em ' + mes + ': ' + mudou + ' célula(s).' : 'Nenhum erro de ortografia encontrado em ' + mes + '.';
   } finally {
     trava.releaseLock();
