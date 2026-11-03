@@ -6,8 +6,14 @@ const ORIGEM_ABA = 'TabelaQualidade';
 // Manutenções original: os lançamentos dos colegas vêm dela (só leitura, nunca alterada)
 const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
 // Cópia de teste: onde o app grava (só nas abas de mês). Pelo painel dá para trocar por outra
-// planilha da mesma conta colando o link; o app lembra a escolha.
+// planilha de uma conta aceita (lista abaixo) colando o link; o app lembra a escolha.
 const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
+// Contas aceitas como dono da planilha de destino (escolhida no painel).
+// Para aceitar outra conta pessoal, acrescente o e-mail na lista, entre aspas e separado por vírgula.
+// A conta dona da planilha de manutenções original nunca é aceita, mesmo se estiver na lista.
+const CONTAS_ACEITAS = [
+  'jpaapw@gmail.com',
+];
 // ======================================================
 
 /**
@@ -119,11 +125,12 @@ function painelDestino(link) {
   } catch (e) {
     throw new Error('Não consegui abrir essa planilha. Confira o link e se você tem acesso a ela.');
   }
-  // Só planilhas da mesma conta da cópia de teste (cópias suas), nunca planilhas de outras pessoas
+  // Só planilhas de contas da lista CONTAS_ACEITAS, e nunca da conta dona da original
   const dono = p => { try { const u = p.getOwner(); return u ? u.getEmail().toLowerCase() : ''; } catch (e) { return ''; } };
-  const meu = dono(SpreadsheetApp.openById(TESTE_ID));
-  if (!meu || dono(nova) !== meu) {
-    throw new Error('Essa planilha não é da sua conta. Use uma cópia sua (Arquivo › Fazer uma cópia).');
+  const donoNova = dono(nova);
+  const aceitas = CONTAS_ACEITAS.map(c => String(c).trim().toLowerCase());
+  if (!donoNova || aceitas.indexOf(donoNova) < 0 || donoNova === dono(planilhaManutencoes_())) {
+    throw new Error('Essa planilha não é de uma conta aceita. Use uma cópia sua (Arquivo › Fazer uma cópia).');
   }
   const props = props_();
   if (id === TESTE_ID) props.deleteProperty('DESTINO_ID'); else props.setProperty('DESTINO_ID', id);
