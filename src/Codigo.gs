@@ -22,47 +22,53 @@ const CONTAS_ACEITAS = [
  * - Por mês: sorteia metade dos notebooks lançados naquele mês
  * - Nunca escolhe serial que já existe na planilha de destino
  * - Técnico: JOÃO PEDRO
- * - Descrição: sorteada com pesos (troca de tela sai pouco)
- * - Pula linhas sem data ou sem serial, e o que não é notebook (monitor, console, controle...)
+ * - Descrição: sorteada pelo banco de descrições (Banco.gs): 70% individuais, 30% combinações,
+ *   pesos de 1 a 10 pela frequência histórica da coluna F da planilha original (até 28/02/2026)
+ * - Pula linhas sem data ou sem serial, e o que não é notebook (monitor, console, impressora...)
  * - Painel (menu Notebooks › Abrir painel): escolher um mês e gerar na hora,
- *   e ligar o modo automático (2 vezes por dia, a cada 12 h, sorteia os notebooks novos do mês atual
- *   e dos meses já gerados, sempre mantendo metade)
+ *   e ligar o modo automático (2 vezes por dia, a cada 12 h, sorteia os notebooks novos
+ *   SÓ do mês atual, sempre mantendo metade; meses antigos só pelo painel)
  * - App web: o mesmo painel em tela cheia
  */
 
 const TECNICO = 'JOÃO PEDRO';
 const SIMULACAO_CAB = ['TÉCNICO', 'MARCA', 'MODELO', 'SERIAL', 'DATA', 'DESCRIÇÃO'];
 
-// [descrição, peso]: peso maior sai mais vezes
+// Lista oficial inicial do banco de descrições (Banco.gs). Os pesos agora vêm do histórico,
+// calculados sozinhos; esta lista só garante que os nomes oficiais existam desde o começo.
 const DESCRICOES = [
-  ['REPARO NA INTERFACE DE ÁUDIO', 10],
-  ['REPARO NA INTERFACE DE VÍDEO', 10],
-  ['REPARO NA INTERFACE DE REDE', 10],
-  ['REPARO NA INTERFACE DE VÍDEO, REDE E ÁUDIO', 8],
-  ['REPARO NA INTERFACE DE REDE E VÍDEO', 6],
-  ['REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA', 8],
-  ['FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE REDE', 6],
-  ['FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO', 6],
-  ['REPARO NA INTERFACE DE TECLADO', 5],
-  ['REPARO NA INTERFACE DE TOUCHPAD', 5],
-  ['REPARO NA INTERFACE DE WIFI', 5],
-  ['TROCA DE BATERIA', 4],
-  ['TROCA DE MEMÓRIA RAM', 4],
-  ['TROCA DE SSD', 4],
-  ['TROCA DE PLACA DE REDE', 3],
-  ['TROCA DE AUTOFALANTE', 3],
-  ['TROCA DE TOUCH PAD', 2],
-  ['TROCA DE SUB-PLACA', 2],
-  ['TROCA DE TELA', 1]
+  'REPARO NA INTERFACE DE ÁUDIO',
+  'REPARO NA INTERFACE DE VÍDEO',
+  'REPARO NA INTERFACE DE REDE',
+  'REPARO NA INTERFACE DE VÍDEO, REDE E ÁUDIO',
+  'REPARO NA INTERFACE DE REDE E VÍDEO',
+  'REPARO NA INTERFACE DE INICIALIZAÇÃO E FORMATAÇÃO DO SISTEMA',
+  'FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE REDE',
+  'FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO',
+  'REPARO NA INTERFACE DE TECLADO',
+  'REPARO NA INTERFACE DE TOUCHPAD',
+  'REPARO NA INTERFACE DE WIFI',
+  'TROCA DE BATERIA',
+  'TROCA DE MEMÓRIA RAM',
+  'TROCA DE SSD',
+  'TROCA DE PLACA DE REDE',
+  'TROCA DE AUTOFALANTE',
+  'TROCA DE TOUCH PAD',
+  'TROCA DE SUB-PLACA',
+  'TROCA DE TELA'
 ];
 
 const MESES = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO',
   'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
 
+// Na MARCA: qualquer uma destas palavras tira o item
 const FORA = /monitor|console|controle|joystick|playstation|ps5|ps4|xbox|nintendo|switch/i;
+// Na DESCRIÇÃO e no MODELO: só o aparelho em si tira o item ("controle de brilho" é de notebook)
+const FORA_DESC = /\b(monitor|console|joystick|playstation|ps[345]|xbox|nintendo|dualsense|dualshock|controle (de |do )?(video ?game|ps[345]|xbox|joystick)|impressora|multifuncional|toner|cartucho|deskjet|laserjet|officejet|smart tank|ink tank|roteador|celular|smartphone)\b/i;
 const NB = /notebook|laptop|macbook|chromebook|ultrabook/i;
-const MARCA_FORA = /^(SONY|SOMY|AOC|LG$|STARLINK|REDRAGON)/;
-const MODELO_NB = /NP\d|340X|750X|740V|760V|BOOK|C4128|E1504|E1404|AG15|A315|A515|DC15|15IRH|ELITEBOOK|MACBOOK/i;
+// Marcas que nunca são notebook. LG e SONY entram só se a descrição ou o modelo mostrar notebook (Gram, Vaio)
+const MARCA_FORA = /^(AOC|STARLINK|REDRAGON)/;
+const MODELO_NB = /NP\d|340X|750X|740V|760V|BOOK|C4128|E1504|E1404|AG15|A315|A515|DC15|15IRH|ELITEBOOK|MACBOOK|GRAM|VAIO|VPC|SVF|SVE/i;
 const MARCAS_NB = ['ACER', 'ASUS', 'DELL', 'LENOVO', 'POSITIVO', 'VAIO', 'HP', 'MICROSOFT',
   'ACERE', 'ASU', 'POSITIVO VAIO', 'POSITIVO INFORMÁTICA'];
 const MARCAS_TEXTO = ['ASUS', 'ACER', 'DELL', 'LENOVO', 'POSITIVO', 'SAMSUNG', 'VAIO', 'APPLE', 'HP'];
@@ -99,7 +105,7 @@ function painelDados() {
   return { meses, auto: triggerAuto_() !== null, url: destino.getUrl(), destino: destino.getName(),
     ultima: JSON.parse(props_().getProperty('ULTIMA_RODADA') || 'null'),
     scan: JSON.parse(props_().getProperty('RESUMO_SCAN') || 'null'), memoria: !!chaveMG_(),
-    erroMg: props_().getProperty('ERRO_MG') || '' };
+    erroMg: props_().getProperty('ERRO_MG') || '', banco: resumoBanco_() };
 }
 
 // Chamado pelo painel: troca a planilha onde o app grava (link ou ID colado pelo usuário)
@@ -136,6 +142,7 @@ function painelGerar(mes) {
   const seguidos = JSON.parse(props.getProperty('MESES_AUTO') || '[]');
   if (seguidos.indexOf(mes) < 0) props.setProperty('MESES_AUTO', JSON.stringify(seguidos.concat(mes)));
   if (!triggerAuto_()) criarTriggerAuto_(); // sortear liga o automático (2 vezes por dia)
+  atualizarBancoMensal_(); // primeira leitura da coluna F do mês, se ainda não houve
   const n = gerar_([mes], false);
   if (n < 0) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
   let aviso = '';
@@ -169,14 +176,21 @@ function ajustarTriggerAuto_() {
   criarTriggerAuto_();
 }
 
-// Roda sozinho 2 vezes por dia: mês atual + meses já gerados
+// Nome da aba do mês atual (ex.: "NOVEMBRO 2026"); muda sozinho na virada do mês
+function mesAtual_(agora) {
+  const hoje = agora || new Date();
+  return MESES[hoje.getMonth()] + ' ' + hoje.getFullYear();
+}
+
+// Roda sozinho 2 vezes por dia. Escreve SÓ no mês atual; meses antigos só pelo painel.
+// A conferência SCAN (que não escreve na planilha) continua nos meses acompanhados.
 function automatico() {
   ajustarTriggerAuto_();
-  const hoje = new Date();
-  const atual = MESES[hoje.getMonth()] + ' ' + hoje.getFullYear();
+  const atual = mesAtual_();
   const seguidos = JSON.parse(props_().getProperty('MESES_AUTO') || '[]');
   try {
-    gerar_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos, true);
+    atualizarBancoMensal_();
+    gerar_([atual], true);
     conferirScan_(seguidos.indexOf(atual) < 0 ? seguidos.concat(atual) : seguidos);
   } catch (e) {
     // Fica registrado no painel; o erro segue para o Google avisar por e-mail
@@ -185,17 +199,40 @@ function automatico() {
   }
 }
 
+// Leitura mensal da coluna F (uma vez por mês). Se falhar, o mês não fica concluído e o
+// sorteio segue com o banco anterior; o erro fica no log do painel.
+function atualizarBancoMensal_() {
+  const trava = LockService.getScriptLock();
+  if (!trava.tryLock(30000)) return;
+  try {
+    atualizarBancoSemTrava_(false);
+  } catch (e) {
+    // já registrado no log; tenta de novo na próxima rodada
+  } finally {
+    trava.releaseLock();
+  }
+}
+
 // Devolve quantos foram sorteados, ou -1 se outra rodada estava em andamento.
 // pularSeIgual: no automático, não refaz o trabalho se nada mudou desde a última rodada.
+// No automático (pularSeIgual) só o mês atual pode ser escrito, venha o que vier em meses.
 function gerar_(meses, pularSeIgual) {
+  if (pularSeIgual) {
+    const atual = mesAtual_();
+    const bloqueados = meses.filter(m => m !== atual);
+    if (bloqueados.length) registrarLog_('AVISO', 'Automático não escreve fora do mês atual: ' + bloqueados.join(', ') + ' ignorado(s).');
+    meses = meses.filter(m => m === atual);
+    if (!meses.length) return 0;
+  }
   const trava = LockService.getScriptLock();
   if (!trava.tryLock(30000)) return -1;
   try {
     const simulacao = abrirSimulacao_();
     const origem = lerOrigem_();
+    const banco = bancoParaSortear_();
     const linhas = p => p.getSheets().map(a => a.getLastRow()).join(',');
     const assinatura = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,
-      JSON.stringify(origem) + '|' + meses.join(',') + '|' + linhas(simulacao)));
+      JSON.stringify(origem) + '|' + meses.join(',') + '|' + linhas(simulacao) + '|' + (banco.pesosEm || '')));
     if (pularSeIgual && props_().getProperty('ASSINATURA') === assinatura) return 0;
 
     const tocadas = new Set();
@@ -203,7 +240,10 @@ function gerar_(meses, pularSeIgual) {
     let n = 0;
     padronizarMarcaModelo_([].concat(...Object.values(plano.porAba)));
     Object.keys(plano.porAba).forEach(nome => {
+      const d = atribuirDescricoes_(plano.porAba[nome], banco);
       gravarNaAba_(abaSimulacao_(simulacao, nome), plano.porAba[nome]);
+      anotarSeriaisDoApp_(plano.porAba[nome].map(it => it.serial));
+      registrarLog_('SORTEIO', nome + ': ' + plano.porAba[nome].length + ' notebook(s), ' + d.ind + ' individual(is) e ' + d.comb + ' combinação(ões).');
       n += plano.porAba[nome].length;
       tocadas.add(nome);
     });
@@ -373,20 +413,11 @@ function gravarNaAba_(aba, itens) {
     l[col.modelo] = it.modelo;
     l[col.serial] = it.serial;
     l[col.data] = it.data;
-    l[col.desc] = sortearDescricao_();
+    l[col.desc] = it.desc;
     return l;
   });
   aba.getRange(ultima + 1, 1, valores.length, largura).setValues(valores);
   aba.getRange(ultima + 1, col.data + 1, valores.length, 1).setNumberFormat('dd/MM/yyyy');
-}
-
-function sortearDescricao_() {
-  const total = DESCRICOES.reduce((t, d) => t + d[1], 0);
-  let r = Math.random() * total;
-  for (const [texto, peso] of DESCRICOES) {
-    if ((r -= peso) < 0) return texto;
-  }
-  return DESCRICOES[0][0];
 }
 
 function embaralhar_(lista) {
@@ -419,7 +450,7 @@ function ultimaLinhaComDados_(aba, largura) {
 function ehNotebook_(marca, modelo, desc) {
   const m = marca.toUpperCase();
   if (FORA.test(m) || MARCA_FORA.test(m)) return false;
-  if (FORA.test(desc) && !NB.test(desc)) return false;
+  if (FORA_DESC.test(desc + ' ' + modelo) && !NB.test(desc)) return false;
   if (NB.test(desc) || MODELO_NB.test(modelo)) return true;
   return MARCAS_NB.indexOf(m) >= 0;
 }
@@ -431,8 +462,9 @@ function marcaFinal_(marca, desc) {
   return achada || m;
 }
 
-// Aceita data do Sheets, "dd/mm/aaaa" ou "aaaa-mm-dd"; recusa data impossível ou no futuro
-function lerData_(v) {
+// Aceita data do Sheets, "dd/mm/aaaa" ou "aaaa-mm-dd"; recusa data impossível ou no futuro.
+// qualquerAno: aceita também datas antes de 2024 (histórico da planilha original)
+function lerData_(v, qualquerAno) {
   let d = null;
   if (v instanceof Date && !isNaN(v)) d = new Date(v.getFullYear(), v.getMonth(), v.getDate());
   else {
@@ -443,7 +475,7 @@ function lerData_(v) {
   }
   if (!d || isNaN(d)) return null;
   const amanha = new Date(Date.now() + 864e5);
-  return d.getFullYear() >= 2024 && d <= amanha ? d : null;
+  return (qualquerAno || d.getFullYear() >= 2024) && d <= amanha ? d : null;
 }
 
 // Serial só com letras e números; "N/A", "sem serial", "0" e parecidos contam como vazio
@@ -470,7 +502,9 @@ const PAINEL_HTML = `<!doctype html>
   .botoes { display:flex; gap:8px; }
   .botoes button { flex:1; }
   #analise { margin-top:8px; }
-  #analise div { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--linha); gap:12px; }
+  #analise div, #banco div.item { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--linha); gap:12px; }
+  #banco h2 { font-size:13px; margin:14px 0 4px; }
+  #banco .comp { color:var(--suave); font-size:11px; }
   .linha { display:flex; justify-content:space-between; align-items:center;
     padding:14px 0; border-top:1px solid var(--linha); margin-top:20px; }
   .suave { color:var(--suave); font-size:12px; margin-top:8px; min-height:16px; }
@@ -495,9 +529,17 @@ const PAINEL_HTML = `<!doctype html>
   <div class="suave" id="msgFerr"></div>
   <div id="analise"></div>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
-  <div class="suave">Duas vezes por dia (a cada 12 horas) sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
+  <div class="suave">Duas vezes por dia (a cada 12 horas) sorteia os notebooks novos só do mês atual. Meses antigos só pelo botão acima.</div>
   <div class="suave" id="ultima"></div>
   <div class="suave" id="scan"></div>
+  <div class="linha"><span>Banco de descrições</span></div>
+  <div class="suave" id="bancoResumo"></div>
+  <div class="botoes">
+    <button class="leve" id="verBanco">Ver banco</button>
+    <button class="leve" id="lerBanco">Ler coluna F agora</button>
+  </div>
+  <div class="suave" id="msgBanco"></div>
+  <div id="banco"></div>
   <div class="linha"><span>Planilha de destino</span></div>
   <div class="suave"><a id="link" href="#" target="_blank" hidden></a></div>
   <input type="text" id="destino" placeholder="Cole o link de outra planilha sua">
@@ -520,6 +562,11 @@ const PAINEL_HTML = `<!doctype html>
         d.erroMg ? 'Memória Global não respondeu: ' + d.erroMg :
         !c ? '' : 'Conferência SCAN: ' + c.ok + ' ok · ' + c.conferir + ' para conferir · ' + c.fora + ' não passaram pelo SCAN' +
           (c.lista && c.lista.length ? '. Conferir: ' + c.lista.join(', ') : '');
+      const b = d.banco;
+      $('bancoResumo').textContent = !b ? 'Ainda não lido: o primeiro sorteio lê a coluna F da planilha original.' :
+        b.individuais + ' manutenções · ' + b.combinacoes + ' combinações · última leitura ' + (b.leitura || '—') +
+        ' · pesos de ' + (b.pesosEm || '—') + (b.soHistorico ? ' · ' + b.soHistorico + ' só no histórico' : '') +
+        (b.naoInterpretadas ? ' · ' + b.naoInterpretadas + ' textos não interpretados' : '');
     }).withFailureHandler(e => $('msg').textContent = e.message).painelDados();
   }
   $('gerar').onclick = () => {
@@ -554,6 +601,26 @@ const PAINEL_HTML = `<!doctype html>
   });
   ferramenta('formatar', 'painelFormatar', 'Arrumando a formatação…', t => $('msgFerr').textContent = t);
   ferramenta('ortografia', 'painelOrtografia', 'Corrigindo a ortografia…', t => $('msgFerr').textContent = t);
+  const lista = (titulo, itens) => '<h2>' + esc(titulo) + '</h2>' + itens.map(x =>
+    '<div class="item"><span>' + esc(x.desc) + (x.comp && x.comp.length ? '<br><span class="comp">' + x.comp.map(esc).join(' + ') + '</span>' : '') +
+    '</span><span>' + x.freq + ' · ' + x.peso + '</span></div>').join('');
+  $('verBanco').onclick = () => {
+    $('verBanco').disabled = true; $('msgBanco').textContent = 'Carregando o banco…';
+    google.script.run.withSuccessHandler(r => {
+      $('verBanco').disabled = false;
+      $('msgBanco').textContent = 'Frequência até 28/02/2026 · peso (1 a 10). Medianas: individuais ' + r.medianas.I + ', combinações ' + r.medianas.C + '.';
+      $('banco').innerHTML = lista('Manutenções individuais', r.individuais) + lista('Combinações', r.combinacoes) +
+        (r.soHistorico.length ? lista('Só no histórico (texto livre antigo, não sai no sorteio)', r.soHistorico) : '') +
+        (r.naoInterpretadas.length ? '<h2>Não interpretados (diagnóstico)</h2>' + r.naoInterpretadas.map(x =>
+          '<div class="item"><span>' + esc(x.texto) + '</span><span>' + x.n + '</span></div>').join('') : '') +
+        (r.log.length ? '<h2>Log</h2>' + r.log.map(x => '<div class="item"><span>' + esc(x.tipo + ': ' + x.msg) + '</span><span>' + esc(x.quando) + '</span></div>').join('') : '');
+    }).withFailureHandler(e => { $('verBanco').disabled = false; $('msgBanco').textContent = e.message; }).painelBanco();
+  };
+  $('lerBanco').onclick = () => {
+    $('lerBanco').disabled = true; $('msgBanco').textContent = 'Lendo a coluna F da planilha original…';
+    google.script.run.withSuccessHandler(t => { $('lerBanco').disabled = false; $('msgBanco').textContent = t; carregar(); })
+      .withFailureHandler(e => { $('lerBanco').disabled = false; $('msgBanco').textContent = e.message; }).painelAtualizarBanco();
+  };
   $('trocar').onclick = () => {
     $('trocar').disabled = true; $('msgDestino').textContent = 'Conferindo a planilha…';
     google.script.run.withSuccessHandler(t => {

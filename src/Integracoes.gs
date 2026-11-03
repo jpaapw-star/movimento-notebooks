@@ -90,22 +90,33 @@ function padronizarMarcaModelo_(itens) {
   });
 }
 
-// Situação de cada serial: { serial: [situação, conferido em (ms), descrição] }, guardada em pedaços
-function lerScan_() {
-  const props = props_(), n = Number(props.getProperty('SCAN_N') || 0);
+// Guarda um valor grande nas propriedades do script, em pedaços (cada propriedade aceita até 9 KB).
+// Acentos viram \uXXXX para cada caractere ocupar 1 byte e o pedaço nunca passar do limite.
+function gravarGrande_(prefixo, valor) {
+  const props = props_(), antes = Number(props.getProperty(prefixo + '_N') || 0);
+  const texto = JSON.stringify(valor).replace(/[\u007f-\uffff]/g, c => '\\u' + ('000' + c.charCodeAt(0).toString(16)).slice(-4));
+  const pedacos = {};
+  let n = 0;
+  for (let i = 0; i < texto.length; i += SCAN_PEDACO) pedacos[prefixo + '_' + n++] = texto.slice(i, i + SCAN_PEDACO);
+  pedacos[prefixo + '_N'] = String(n);
+  props.setProperties(pedacos);
+  for (let i = n; i < antes; i++) props.deleteProperty(prefixo + '_' + i);
+}
+
+function lerGrande_(prefixo) {
+  const props = props_(), n = Number(props.getProperty(prefixo + '_N') || 0);
   let texto = '';
-  for (let i = 0; i < n; i++) texto += props.getProperty('SCAN_' + i) || '';
-  try { return texto ? JSON.parse(texto) : {}; } catch (e) { return {}; }
+  for (let i = 0; i < n; i++) texto += props.getProperty(prefixo + '_' + i) || '';
+  try { return texto ? JSON.parse(texto) : null; } catch (e) { return null; }
+}
+
+// Situação de cada serial: { serial: [situação, conferido em (ms), descrição] }
+function lerScan_() {
+  return lerGrande_('SCAN') || {};
 }
 
 function gravarScan_(mapa) {
-  const props = props_(), texto = JSON.stringify(mapa), antes = Number(props.getProperty('SCAN_N') || 0);
-  const pedacos = {};
-  let n = 0;
-  for (let i = 0; i < texto.length; i += SCAN_PEDACO) pedacos['SCAN_' + n++] = texto.slice(i, i + SCAN_PEDACO);
-  pedacos.SCAN_N = String(n);
-  props.setProperties(pedacos);
-  for (let i = n; i < antes; i++) props.deleteProperty('SCAN_' + i);
+  gravarGrande_('SCAN', mapa);
 }
 
 // Confere os seriais dos meses acompanhados com o que o SCAN já leu.
