@@ -31,20 +31,37 @@ function semAcento_(t) {
   return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toUpperCase();
 }
 
-// Chamado pelo painel: descrições repetidas do mês, só nas linhas com o técnico do app
+// Separa uma descrição com "e" ou vírgula em cada serviço feito.
+// "REPARO NA INTERFACE DE VÍDEO, REDE E ÁUDIO" → REPARO NA INTERFACE DE VÍDEO / ... DE REDE / ... DE ÁUDIO
+function servicos_(desc) {
+  const partes = desc.split(/\s*,\s*|\s+E\s+/).map(p => p.trim()).filter(Boolean);
+  let prefixo = '';
+  return partes.map(p => {
+    if (p.indexOf(' ') < 0 && prefixo) return prefixo + p;
+    const i = p.lastIndexOf(' DE ');
+    prefixo = i >= 0 ? p.slice(0, i + 4) : '';
+    return p;
+  });
+}
+
+// Chamado pelo painel: quantas vezes cada serviço aparece no mês, só nas linhas com o técnico do app.
+// Descrição com "e" ou vírgula conta cada serviço separado.
 function painelAnalise(mes) {
   const aba = abaDoMes_(mes), col = colunas_(aba);
   if (col.tecnico < 0 || col.desc < 0) throw new Error('Na aba "' + mes + '" falta a coluna TÉCNICO ou DESCRIÇÃO.');
   const tecnico = semAcento_(TECNICO), conta = {};
-  let total = 0;
+  let total = 0, servicos = 0, combinados = 0;
   aba.getRange(2, 1, aba.getLastRow() - 1, aba.getLastColumn()).getValues().forEach(l => {
     if (semAcento_(l[col.tecnico]) !== tecnico) return;
-    const d = String(l[col.desc] || '').replace(/\s+/g, ' ').trim().toUpperCase() || '(sem descrição)';
-    conta[d] = (conta[d] || 0) + 1;
+    const d = String(l[col.desc] || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    const lista = d ? servicos_(d) : ['(sem descrição)'];
+    lista.forEach(s => { conta[s] = (conta[s] || 0) + 1; });
+    if (lista.length > 1) combinados++;
+    servicos += lista.length;
     total++;
   });
   const lista = Object.keys(conta).map(d => ({ desc: d, n: conta[d] })).sort((a, b) => b.n - a.n || a.desc.localeCompare(b.desc));
-  return { mes, total, lista };
+  return { mes, total, servicos, combinados, lista };
 }
 
 // Chamado pelo painel: arruma a formatação da aba do mês
