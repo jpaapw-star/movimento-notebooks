@@ -49,7 +49,7 @@ function consultarMG_(itens) {
             { tipo: 'SERIAL', valor: it.serial }].filter(Boolean) } })
       })));
     } catch (e) {
-      erro = 'fora do ar'; // memória fora do ar: segue sem ela
+      erro = 'fora do ar (' + String(e && e.message || e).slice(0, 150) + ')'; // memória fora do ar: segue sem ela
       break;
     }
     respostas.forEach((r, j) => {
