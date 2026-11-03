@@ -1,13 +1,14 @@
 /**
  * Integrações com a Memória Global (porta pela internet), usadas pela cópia de teste:
  * - padroniza marca e modelo dos notebooks sorteados (pelo EAN)
- * - confere cada serial da qualidade com o que o SCAN já leu (aba "CONFERÊNCIA SCAN")
+ * - confere cada serial da qualidade com o que o SCAN já leu (resultado no painel, sem criar aba)
  * Sem a chave (segredo MG_CHAVE), tudo isso fica desligado e o resto funciona igual.
  */
 
 const MG_URL = 'https://script.google.com/macros/s/AKfycbzL7PBVhj04P720XeUq3bvamGtrKZpDmtzvimc6kH1H7LpBf7s1SU6Bq7Q957Nvf4BXTg/exec';
+// Aba que versões antigas criavam: é apagada se estiver vazia (o app só usa abas de mês)
 const ABA_SCAN = 'CONFERÊNCIA SCAN';
-const CAB_SCAN = ['SERIAL', 'MARCA', 'MODELO', 'EAN', 'DATA', 'SITUAÇÃO', 'CONFERIDO EM'];
+const SCAN_PEDACO = 8000; // tamanho de cada pedaço guardado nas propriedades do script
 const SCAN_POR_RODADA = 120;
 const MG_POR_VEZ = 10; // consultas em paralelo (mais que isso a porta recusa por excesso)
 
@@ -89,6 +90,24 @@ function padronizarMarcaModelo_(itens) {
   });
 }
 
+// Situação de cada serial: { serial: [situação, conferido em (ms), descrição] }, guardada em pedaços
+function lerScan_() {
+  const props = props_(), n = Number(props.getProperty('SCAN_N') || 0);
+  let texto = '';
+  for (let i = 0; i < n; i++) texto += props.getProperty('SCAN_' + i) || '';
+  try { return texto ? JSON.parse(texto) : {}; } catch (e) { return {}; }
+}
+
+function gravarScan_(mapa) {
+  const props = props_(), texto = JSON.stringify(mapa), antes = Number(props.getProperty('SCAN_N') || 0);
+  const pedacos = {};
+  let n = 0;
+  for (let i = 0; i < texto.length; i += SCAN_PEDACO) pedacos['SCAN_' + n++] = texto.slice(i, i + SCAN_PEDACO);
+  pedacos.SCAN_N = String(n);
+  props.setProperties(pedacos);
+  for (let i = n; i < antes; i++) props.deleteProperty('SCAN_' + i);
+}
+
 // Confere os seriais dos meses acompanhados com o que o SCAN já leu.
 // Cada serial é conferido uma vez; "não passou pelo SCAN" é conferido de novo depois de 1 dia.
 function conferirScan_(meses) {
@@ -97,48 +116,37 @@ function conferirScan_(meses) {
   if (!trava.tryLock(30000)) return;
   try {
     const teste = abrirSimulacao_();
+    const velha = teste.getSheetByName(ABA_SCAN);
+    if (velha && velha.getLastRow() <= 1) teste.deleteSheet(velha);
     const plano = montarPlano_([planilhaManutencoes_(), teste], []);
     const todos = [].concat(...meses.map(m => (plano.listaMes || {})[m] || []));
-    let aba = teste.getSheetByName(ABA_SCAN);
-    if (!aba) {
-      aba = teste.insertSheet(ABA_SCAN);
-      aba.getRange(1, 1, 1, CAB_SCAN.length).setValues([CAB_SCAN]).setFontWeight('bold');
-      aba.setFrozenRows(1);
-    }
-    const linhas = aba.getLastRow() >= 2 ? aba.getRange(2, 1, aba.getLastRow() - 1, CAB_SCAN.length).getValues() : [];
-    const onde = new Map(linhas.map((l, i) => [normSerial_(l[0]), i]));
+    const mapa = lerScan_();
     const umDia = Date.now() - 864e5;
     const pendentes = todos.filter(it => {
-      const i = onde.get(normSerial_(it.serial));
-      if (i === undefined) return true;
-      const l = linhas[i];
-      return String(l[5]).indexOf('Não passou') === 0 && (!(l[6] instanceof Date) || l[6].getTime() < umDia);
+      const v = mapa[normSerial_(it.serial)];
+      return !v || (v[0] === 'FORA' && v[1] < umDia);
     }).slice(0, SCAN_POR_RODADA);
     if (pendentes.length) {
       const mg = consultarMG_(pendentes);
-      const agora = new Date();
+      let mudou = false;
       pendentes.forEach(it => {
         const p = mg[normSerial_(it.serial)];
         if (!p) return; // memória não respondeu: tenta na próxima rodada
-        let situacao;
-        if (!p.porSerial) situacao = 'Não passou pelo SCAN';
+        let v;
+        if (!p.porSerial) v = ['FORA', Date.now()];
         else if (p.porEan && p.porEan.id !== p.porSerial.id) {
-          situacao = 'CONFERIR: o SCAN leu este serial em outro produto (' +
-            [p.porSerial.marca, p.porSerial.modelo].filter(Boolean).join(' ') + ')';
-        } else situacao = 'OK';
-        const nova = [it.serial, it.marca, it.modelo, it.ean, it.data, situacao, agora];
-        const i = onde.get(normSerial_(it.serial));
-        if (i === undefined) { onde.set(normSerial_(it.serial), linhas.length); linhas.push(nova); } else linhas[i] = nova;
+          v = ['CONFERIR', Date.now(), [p.porSerial.marca, p.porSerial.modelo].filter(Boolean).join(' ')];
+        } else v = ['OK', Date.now()];
+        mapa[normSerial_(it.serial)] = v;
+        mudou = true;
       });
-      // Se a memória não respondeu nenhum, não há nada para gravar
-      if (linhas.length) {
-        aba.getRange(2, 1, linhas.length, CAB_SCAN.length).setValues(linhas);
-        aba.getRange(2, 5, linhas.length, 1).setNumberFormat('dd/MM/yyyy');
-        aba.getRange(2, 7, linhas.length, 1).setNumberFormat('dd/MM/yyyy HH:mm');
-      }
+      if (mudou) gravarScan_(mapa);
     }
-    const conta = t => linhas.filter(l => String(l[5]).indexOf(t) === 0).length;
-    props_().setProperty('RESUMO_SCAN', JSON.stringify({ ok: conta('OK'), conferir: conta('CONFERIR'), fora: conta('Não passou') }));
+    const valores = Object.keys(mapa).map(s => [s, mapa[s]]);
+    const conta = t => valores.filter(x => x[1][0] === t).length;
+    const lista = valores.filter(x => x[1][0] === 'CONFERIR').slice(0, 10)
+      .map(x => x[0] + (x[1][2] ? ' (SCAN leu como ' + x[1][2] + ')' : ''));
+    props_().setProperty('RESUMO_SCAN', JSON.stringify({ ok: conta('OK'), conferir: conta('CONFERIR'), fora: conta('FORA'), lista }));
   } finally {
     trava.releaseLock();
   }
