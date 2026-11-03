@@ -3,14 +3,11 @@
 // Qualidade: de onde vêm os notebooks (só leitura, nunca alterada)
 const ORIGEM_ID = '1JHONHaipHAKmtkcQ_7mm8VXA-h-LBQuu-I8uzPhjgDQ';
 const ORIGEM_ABA = 'TabelaQualidade';
-// Manutenções original: os lançamentos dos colegas vêm dela (só leitura, nunca alterada)
-const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
 // Cópia de teste: onde o app grava (só nas abas de mês). Pelo painel dá para trocar por outra
 // planilha de uma conta aceita (lista abaixo) colando o link; o app lembra a escolha.
 const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
 // Contas aceitas como dono da planilha de destino (escolhida no painel).
 // Para aceitar outra conta pessoal, acrescente o e-mail na lista, entre aspas e separado por vírgula.
-// A conta dona da planilha de manutenções original nunca é aceita, mesmo se estiver na lista.
 const CONTAS_ACEITAS = [
   'jpaapw@gmail.com',
   'jpaapw@gmail.com',
@@ -21,11 +18,9 @@ const CONTAS_ACEITAS = [
  * Transportar notebooks
  * Lê os notebooks da planilha de qualidade e grava na cópia de teste,
  * nas abas de mês (ex.: "OUTUBRO 2026"), sempre em ordem de data. Não cria nenhuma outra aba.
- * Cópia viva: as linhas que os colegas lançam na planilha de manutenções original
- * são copiadas para a cópia de teste a cada rodada.
  *
  * - Por mês: sorteia metade dos notebooks lançados naquele mês
- * - Nunca escolhe serial que já existe na planilha original ou na cópia de teste
+ * - Nunca escolhe serial que já existe na planilha de destino
  * - Técnico: JOÃO PEDRO
  * - Descrição: sorteada com pesos (troca de tela sai pouco)
  * - Pula linhas sem data ou sem serial, e o que não é notebook (monitor, console, controle...)
@@ -89,10 +84,6 @@ function doGet() {
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
-function planilhaManutencoes_() {
-  return SpreadsheetApp.openById(MANUTENCOES_ID);
-}
-
 function props_() {
   return PropertiesService.getScriptProperties();
 }
@@ -100,7 +91,7 @@ function props_() {
 // Chamado pelo painel: lista dos meses e estado do automático
 function painelDados() {
   ajustarTriggerAuto_();
-  const plano = montarPlano_([planilhaManutencoes_(), abrirSimulacao_()], []);
+  const plano = montarPlano_(abrirSimulacao_(), []);
   const meses = Object.keys(plano.resumo)
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
     .map(nome => ({ nome, total: plano.resumo[nome].total, feitos: plano.resumo[nome].feitos }));
@@ -116,8 +107,8 @@ function painelDestino(link) {
   const m = String(link || '').trim().match(/\/d\/([\w-]{20,})/) || String(link || '').trim().match(/^([\w-]{20,})$/);
   if (!m) throw new Error('Não reconheci o link. Cole o endereço da planilha (docs.google.com/spreadsheets/d/...).');
   const id = m[1];
-  // A qualidade e a original só são lidas: nunca viram destino
-  if (id === ORIGEM_ID || id === MANUTENCOES_ID) {
+  // A qualidade só é lida: nunca vira destino
+  if (id === ORIGEM_ID) {
     throw new Error('Essa planilha só é lida pelo app. Escolha uma cópia sua.');
   }
   let nova;
@@ -126,11 +117,11 @@ function painelDestino(link) {
   } catch (e) {
     throw new Error('Não consegui abrir essa planilha. Confira o link e se você tem acesso a ela.');
   }
-  // Só planilhas de contas da lista CONTAS_ACEITAS, e nunca da conta dona da original
+  // Só planilhas de contas da lista CONTAS_ACEITAS
   const dono = p => { try { const u = p.getOwner(); return u ? u.getEmail().toLowerCase() : ''; } catch (e) { return ''; } };
   const donoNova = dono(nova);
   const aceitas = CONTAS_ACEITAS.map(c => String(c).trim().toLowerCase());
-  if (!donoNova || aceitas.indexOf(donoNova) < 0 || donoNova === dono(planilhaManutencoes_())) {
+  if (!donoNova || aceitas.indexOf(donoNova) < 0) {
     throw new Error('Essa planilha não é de uma conta aceita. Use uma cópia sua (Arquivo › Fazer uma cópia).');
   }
   const props = props_();
@@ -201,15 +192,14 @@ function gerar_(meses, pularSeIgual) {
   if (!trava.tryLock(30000)) return -1;
   try {
     const simulacao = abrirSimulacao_();
-    const original = planilhaManutencoes_();
     const origem = lerOrigem_();
     const linhas = p => p.getSheets().map(a => a.getLastRow()).join(',');
     const assinatura = Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5,
-      JSON.stringify(origem) + '|' + meses.join(',') + '|' + linhas(original) + '|' + linhas(simulacao)));
+      JSON.stringify(origem) + '|' + meses.join(',') + '|' + linhas(simulacao)));
     if (pularSeIgual && props_().getProperty('ASSINATURA') === assinatura) return 0;
 
-    const tocadas = new Set(espelhar_(original, simulacao));
-    const plano = montarPlano_([original, simulacao], meses, origem);
+    const tocadas = new Set();
+    const plano = montarPlano_(simulacao, meses, origem);
     let n = 0;
     padronizarMarcaModelo_([].concat(...Object.values(plano.porAba)));
     Object.keys(plano.porAba).forEach(nome => {
@@ -259,62 +249,6 @@ function abrirSimulacao_() {
   }
 }
 
-// Copia para a cópia de teste as linhas novas das abas de mês da planilha original.
-// Devolve os nomes das abas que receberam linhas.
-function espelhar_(original, teste) {
-  const tocadas = [];
-  original.getSheets().forEach(abaOrig => {
-    const nome = abaOrig.getName();
-    if (!ehAbaDeMes_(nome) || abaOrig.getLastRow() < 2) return;
-    const largura = abaOrig.getLastColumn();
-    const dadosOrig = abaOrig.getRange(1, 1, abaOrig.getLastRow(), largura).getValues();
-    let abaTeste = teste.getSheetByName(nome);
-    if (!abaTeste) {
-      abaTeste = teste.insertSheet(nome);
-      abaTeste.getRange(1, 1, 1, largura).setValues([dadosOrig[0]]).setFontWeight('bold');
-      abaTeste.setFrozenRows(1);
-    }
-    const colOrig = colunas_(abaOrig), colTeste = colunas_(abaTeste);
-    const vistos = new Map();
-    if (abaTeste.getLastRow() >= 2) {
-      abaTeste.getRange(2, 1, abaTeste.getLastRow() - 1, largura).getValues()
-        .forEach((l, i) => vistos.set(chaveLinha_(l, colTeste), { linha: i + 2, valores: l }));
-    }
-    const novas = [];
-    let editadas = 0;
-    dadosOrig.slice(1).forEach(l => {
-      if (!l.some(c => String(c).trim() !== '')) return;
-      const achada = vistos.get(chaveLinha_(l, colOrig));
-      if (!achada) { novas.push(l); return; }
-      // Colega editou a linha na original (ESTADO, ENTREGUE...): a cópia acompanha
-      if (textoLinha_(achada.valores) !== textoLinha_(l)) {
-        abaTeste.getRange(achada.linha, 1, 1, largura).setValues([l]);
-        editadas++;
-      }
-    });
-    if (editadas) tocadas.push(nome);
-    if (!novas.length) return;
-    if (abaTeste.getMaxColumns() < largura) abaTeste.insertColumnsAfter(abaTeste.getMaxColumns(), largura - abaTeste.getMaxColumns());
-    const ultima = ultimaLinhaComDados_(abaTeste, largura);
-    abaTeste.getRange(ultima + 1, 1, novas.length, largura).setValues(novas);
-    if (tocadas.indexOf(nome) < 0) tocadas.push(nome);
-  });
-  return tocadas;
-}
-
-function textoLinha_(l) {
-  return l.map(c => c instanceof Date ? c.getTime() : String(c).trim()).join('|');
-}
-
-// Mesmo aparelho na mesma data = mesma linha (assim uma correção de descrição não duplica)
-function chaveLinha_(l, col) {
-  const txt = i => (i < 0 ? '' : l[i] instanceof Date ?
-    Utilities.formatDate(l[i], 'America/Sao_Paulo', 'yyyy-MM-dd') : String(l[i]).trim().toUpperCase());
-  const serial = normSerial_(col.serial < 0 ? '' : l[col.serial]);
-  return serial ? serial + '|' + txt(col.data) :
-    [col.tecnico, col.marca, col.modelo, col.serial, col.data, col.desc].map(txt).join('|');
-}
-
 function ehAbaDeMes_(nome) {
   const m = String(nome).trim().toUpperCase().match(/^(\S+) (\d{4})$/);
   return !!m && MESES.indexOf(m[1]) >= 0;
@@ -342,22 +276,22 @@ function abaSimulacao_(planilha, nome) {
 }
 
 // meses: lista de abas para sortear ([] = só calcula o resumo, sem sortear)
-function montarPlano_(planilhas, meses, origem) {
-  // planilhas = [original, teste]. Sorteados = seriais da cópia de teste que não estão na original.
-  const porPlanilha = planilhas.map(p => {
-    const set = new Set();
-    p.getSheets().forEach(aba => {
-      if (aba.getName() === ABA_SCAN) return; // lista de conferência, não são lançamentos
-      const col = colunas_(aba);
-      if (col.serial < 0 || aba.getLastRow() < 2) return;
-      aba.getRange(2, col.serial + 1, aba.getLastRow() - 1, 1).getValues()
-        .forEach(l => { const s = normSerial_(l[0]); if (s) set.add(s); });
+function montarPlano_(destino, meses, origem) {
+  // existentes = todos os seriais do destino; naSimulacao = os lançados com o técnico do app
+  const existentes = new Set(), naSimulacao = new Set();
+  const semAcento = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+  const tecnico = semAcento(TECNICO);
+  destino.getSheets().forEach(aba => {
+    if (aba.getName() === ABA_SCAN) return; // aba antiga de conferência, não são lançamentos
+    const col = colunas_(aba);
+    if (col.serial < 0 || aba.getLastRow() < 2) return;
+    aba.getRange(2, 1, aba.getLastRow() - 1, aba.getLastColumn()).getValues().forEach(l => {
+      const s = normSerial_(l[col.serial]);
+      if (!s) return;
+      existentes.add(s);
+      if (col.tecnico >= 0 && semAcento(l[col.tecnico]) === tecnico) naSimulacao.add(s);
     });
-    return set;
   });
-  const existentes = new Set();
-  porPlanilha.forEach(set => set.forEach(s => existentes.add(s)));
-  const naSimulacao = new Set([...porPlanilha[porPlanilha.length - 1]].filter(s => !porPlanilha[0].has(s)));
 
   const dados = origem || lerOrigem_();
   const cab = dados[0].map(c => String(c).trim().toUpperCase());

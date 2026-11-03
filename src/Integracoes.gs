@@ -118,7 +118,7 @@ function conferirScan_(meses) {
     const teste = abrirSimulacao_();
     const velha = teste.getSheetByName(ABA_SCAN);
     if (velha && velha.getLastRow() <= 1) teste.deleteSheet(velha);
-    const plano = montarPlano_([planilhaManutencoes_(), teste], []);
+    const plano = montarPlano_(teste, []);
     const todos = [].concat(...meses.map(m => (plano.listaMes || {})[m] || []));
     const mapa = lerScan_();
     const umDia = Date.now() - 864e5;
