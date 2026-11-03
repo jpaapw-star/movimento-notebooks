@@ -46,8 +46,7 @@ const TRADUCOES = [
   { troca: true, re: /\bSUB ?-?PLACA\b/, nome: 'TROCA DE SUB-PLACA' },
   { troca: true, re: /\b(TELA|DISPLAY)\b/, nome: 'TROCA DE TELA' },
   { re: /\b(AUDIO|SOM|SON|AUTO ?FALANTES?|ALTO ?FALANTES?|FALANTES?|MIC|MICROFONES?|CHIADOS?)\b/, nome: 'REPARO NA INTERFACE DE ÁUDIO' },
-  { re: /\b(WIFI|WI-FI|WIRELESS|WIRELLES)\b/, nome: 'REPARO NA INTERFACE DE WIFI' },
-  { re: /\bREDES?\b(?! ?(WIFI|WI-FI))/, nome: 'REPARO NA INTERFACE DE REDE' },
+  { re: /\b(REDES?|WIFI|WI-FI|WIRELESS|WIRELLES)\b/, nome: 'REPARO NA INTERFACE DE REDE' }, // WIFI é REDE
   { re: /\b(VIDEO|IMAGEM|TELA PRETA)\b/, nome: 'REPARO NA INTERFACE DE VÍDEO' },
   { re: /\b(TECLADO|TECLAS?|REMAPEAMENTO)\b/, nome: 'REPARO NA INTERFACE DE TECLADO' },
   { re: /\b(TOUCH ?PAD|TOCUH ?PAD)\b/, nome: 'REPARO NA INTERFACE DE TOUCHPAD' },
@@ -61,7 +60,9 @@ const TRADUCOES = [
 function textoOficial_(t) {
   const base = String(t || '').replace(/\s+/g, ' ').trim().toUpperCase().replace(/[.\s]+$/, '');
   return base.replace(/[A-Za-zÀ-ÿ-]+/g, p => (typeof ORTOGRAFIA !== 'undefined' && ORTOGRAFIA[p]) || p)
-    .replace(/FORMATAÇÃO (NO|DE) SISTEMA/g, 'FORMATAÇÃO DO SISTEMA');
+    .replace(/FORMATAÇÃO (NO|DE) SISTEMA/g, 'FORMATAÇÃO DO SISTEMA')
+    .replace(/\bINTERFACE DE (WIFI|WIRELESS)\b/g, 'INTERFACE DE REDE') // WIFI e REDE são a mesma manutenção
+    .replace(/(,\s*|\sE\s)(WIFI|WIRELESS)\b/g, '$1REDE');
 }
 
 // Lê uma descrição e devolve seus componentes, ou null se não der para interpretar com segurança.

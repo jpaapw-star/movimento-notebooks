@@ -315,21 +315,25 @@ teste('14. Dados existentes preservados e nenhuma aba além dos meses', () => {
 teste('Tradução: texto livre antigo conta para o nome oficial, sem cadastrar o texto livre', () => {
   const amb = cenario();
   const tr = t => amb.rodar(`JSON.stringify(traduzirDescricao_(${JSON.stringify(t)}))`);
-  assert.strictEqual(tr('REPARO WIFI NÃO FUNCIONA'), '["REPARO NA INTERFACE DE WIFI"]');
+  assert.strictEqual(tr('REPARO WIFI NÃO FUNCIONA'), '["REPARO NA INTERFACE DE REDE"]');
   assert.strictEqual(tr('PLACA DE AUDIO NÃO FUNCIONA'), '["REPARO NA INTERFACE DE ÁUDIO"]');
-  assert.strictEqual(tr('REDES WIFI NÃO APARECEM'), '["REPARO NA INTERFACE DE WIFI"]');
+  assert.strictEqual(tr('REDES WIFI NÃO APARECEM'), '["REPARO NA INTERFACE DE REDE"]');
+  assert.strictEqual(tr('REPARO WIFI NÃO FUNCIONA E PLACA DE REDE NÃO APARECE NO CMD'), '["REPARO NA INTERFACE DE REDE"]', 'WIFI e REDE são uma coisa só');
+  assert.strictEqual(amb.rodar(`interpretarDescricao_('REPARO NA INTERFACE DE WIFI').map(c => c.texto).join()`), 'REPARO NA INTERFACE DE REDE');
+  assert.strictEqual(amb.rodar(`interpretarDescricao_('REPARO NA INTERFACE DE VÍDEO, WIFI E REDE').map(c => c.texto).join()`), 'REPARO NA INTERFACE DE VÍDEO,REPARO NA INTERFACE DE REDE');
   assert.strictEqual(tr('SSD NÃO APARECE NA BIOS'), '["REPARO NA INTERFACE DE INICIALIZAÇÃO"]');
   assert.strictEqual(tr('TROCA DE BATERIA E SSD'), '["TROCA DE BATERIA","TROCA DE SSD"]');
-  assert.strictEqual(tr('WIFI NÃO CONECTA E MICROFONE ESTOURADO'), '["REPARO NA INTERFACE DE WIFI","REPARO NA INTERFACE DE ÁUDIO"]');
+  assert.strictEqual(tr('WIFI NÃO CONECTA E MICROFONE ESTOURADO'), '["REPARO NA INTERFACE DE REDE","REPARO NA INTERFACE DE ÁUDIO"]');
   assert.strictEqual(tr('TROCA DE TECLADO E FORMATAÇÃO'), 'null', 'parte sem tradução: não traduz');
   assert.strictEqual(tr('PESQUISA GOOGLE'), 'null');
   amb.rodar('atualizarBancoSemTrava_(true)');
   const b = banco(amb);
-  const wifi = b.itens['I:REPARO NA INTERFACE DE WIFI'];
+  assert.ok(!b.itens['I:REPARO NA INTERFACE DE WIFI'], 'WIFI separado de REDE');
+  const wifi = b.itens['I:REPARO NA INTERFACE DE REDE'];
   assert.strictEqual(wifi.freq, 1);
   assert.strictEqual(wifi.freqTraduzida, 1);
   assert.ok(!Object.values(b.itens).some(i => /NAO FUNCIONA|NÃO FUNCIONA/.test(i.desc)), 'texto livre virou cadastro');
-  assert.ok(b.traducoes.some(t => t.para === 'REPARO NA INTERFACE DE WIFI'));
+  assert.ok(b.traducoes.some(t => t.para === 'REPARO NA INTERFACE DE REDE'));
 });
 
 teste('Painel: consulta ao banco e resumo', () => {
