@@ -27,6 +27,33 @@ const PREFIXOS_COMPLETOS = ['FORMATAÇÃO DO SISTEMA'];
 // Palavras de sintoma ou diagnóstico: o texto não é uma manutenção padronizada
 const PROIBIDAS = /\b(NAO|NN|ERRO|ERROR|DEFEITO|FUNCIONA|FUNCIONANDO|PAROU|APARECE|APARECEM|RECONHECE|RECONHECEM|ESTOURADO|ESTOURA|TRAVADO|TRAVANDO|SEM|COM|PARA|POR)\b|[()\/:;?!+=]|\d/;
 const MAX_PALAVRAS_COMPONENTE = 4;
+const ORIGEM_OFICIAL = 'LISTA OFICIAL DO APP';
+const ORIGEM_TRADUCAO = 'TRADUÇÃO DO HISTÓRICO';
+const MAX_TRADUCOES = 80; // exemplos de tradução guardados para conferência no painel
+
+// Tradução do texto livre antigo (até 28/02/2026) para os nomes oficiais, só para contar frequência.
+// Cada parte do texto (separada por vírgula ou "E") precisa virar pelo menos um nome oficial; se alguma
+// parte não vira, o texto não é traduzido (nada é inventado). Comparação sem acento, em maiúsculas.
+// Partes que começam com TROCA (ou seguem uma TROCA sem verbo próprio) só usam as regras de troca.
+// Para ensinar uma tradução nova, acrescente uma linha aqui.
+const TRADUCOES = [
+  { troca: true, re: /\bBATERIA\b/, nome: 'TROCA DE BATERIA' },
+  { troca: true, re: /\b(MEMORIA|RAM)\b/, nome: 'TROCA DE MEMÓRIA RAM' },
+  { troca: true, re: /\b(SSD|HDD?)\b/, nome: 'TROCA DE SSD' },
+  { troca: true, re: /\bPLACA (DE )?(REDE|WIFI|WI-FI|WIRELESS)\b/, nome: 'TROCA DE PLACA DE REDE' },
+  { troca: true, re: /\b(AUTO ?FALANTES?|ALTO ?FALANTES?|FALANTES?)\b/, nome: 'TROCA DE AUTOFALANTE' },
+  { troca: true, re: /\bTOUCH ?PAD\b/, nome: 'TROCA DE TOUCH PAD' },
+  { troca: true, re: /\bSUB ?-?PLACA\b/, nome: 'TROCA DE SUB-PLACA' },
+  { troca: true, re: /\b(TELA|DISPLAY)\b/, nome: 'TROCA DE TELA' },
+  { re: /\b(AUDIO|SOM|SON|AUTO ?FALANTES?|ALTO ?FALANTES?|FALANTES?|MIC|MICROFONES?|CHIADOS?)\b/, nome: 'REPARO NA INTERFACE DE ÁUDIO' },
+  { re: /\b(WIFI|WI-FI|WIRELESS|WIRELLES)\b/, nome: 'REPARO NA INTERFACE DE WIFI' },
+  { re: /\bREDES?\b(?! ?(WIFI|WI-FI))/, nome: 'REPARO NA INTERFACE DE REDE' },
+  { re: /\b(VIDEO|IMAGEM|TELA PRETA)\b/, nome: 'REPARO NA INTERFACE DE VÍDEO' },
+  { re: /\b(TECLADO|TECLAS?|REMAPEAMENTO)\b/, nome: 'REPARO NA INTERFACE DE TECLADO' },
+  { re: /\b(TOUCH ?PAD|TOCUH ?PAD)\b/, nome: 'REPARO NA INTERFACE DE TOUCHPAD' },
+  { re: /\b(BIOS|BOOT|INICIALIZACAO|NAO LIGA|BIPS?|EFI|SHELL)\b|\b(SSD|HDD?)\b.*\bNAO (APARECE|RECONHECE|ENCONTRA)|\bNAO (APARECE|RECONHECE|ENCONTRA)\b.*\b(SSD|HDD?)\b/, nome: 'REPARO NA INTERFACE DE INICIALIZAÇÃO' },
+  { re: /\b(FORMATACAO|FORMATAR|WINDOWS|LINUX|UBUNTU|UNBUNTO|SISTEMA OPERACIONAL|CORROMPIDO)\b|\bS\/O\b/, nome: 'FORMATAÇÃO DO SISTEMA' }
+];
 
 // ---------- texto ----------
 
@@ -73,6 +100,23 @@ function interpretarDescricao_(descricao) {
   return comps.length ? comps : null;
 }
 
+// Devolve os nomes oficiais de um texto livre antigo, ou null se alguma parte não tiver tradução
+function traduzirDescricao_(descricao) {
+  const t = semAcento_(textoOficial_(descricao));
+  if (!t) return null;
+  const nomes = [];
+  let troca = false;
+  for (const parte of t.split(/\s*,\s*|\s+E\s+/)) {
+    if (!parte) return null;
+    if (/^TROCA\b/.test(parte)) troca = true;
+    else if (/^(REPARO|RETIRADA|REMOCAO|FORMATACAO|AJUSTE|LIMPEZA|INSTALACAO)\b/.test(parte)) troca = false;
+    const achados = TRADUCOES.filter(r => !!r.troca === troca && r.re.test(parte)).map(r => r.nome);
+    if (!achados.length) return null;
+    achados.forEach(n => { if (nomes.indexOf(n) < 0) nomes.push(n); });
+  }
+  return nomes.length ? nomes : null;
+}
+
 function idCombinacao_(chaves) {
   return 'C:' + chaves.slice().sort().join(' + ');
 }
@@ -87,9 +131,9 @@ function escreverCombinacao_(textos) {
     if (g) g.restos.push(resto);
     else grupos.push(resto ? { prefixo, restos: [resto] } : { prefixo: null, restos: [texto] });
   });
-  const lista = l => l.length < 2 ? l[0] : l.slice(0, -1).join(', ') + ' E ' + l[l.length - 1];
-  const frases = grupos.map(g => g.prefixo ? g.prefixo + ' ' + lista(g.restos) : g.restos[0]);
-  return frases.length < 2 ? frases[0] : frases.slice(0, -1).join(' E ') + ' E ' + frases[frases.length - 1];
+  // Só o primeiro de cada grupo leva o começo; vírgulas entre os itens e "E" antes do último
+  const partes = [].concat(...grupos.map(g => g.restos.map((r, i) => g.prefixo && !i ? g.prefixo + ' ' + r : r)));
+  return partes.length < 2 ? partes[0] : partes.slice(0, -1).join(', ') + ' E ' + partes[partes.length - 1];
 }
 
 // ---------- pesos ----------
@@ -137,7 +181,7 @@ function cadastrar_(banco, comps, origem, novos) {
   const individual = c => {
     const id = 'I:' + c.chave;
     if (!banco.itens[id]) {
-      banco.itens[id] = { id, tipo: 'I', desc: c.texto, freq: 0, peso: 1, sorteavel: origem === 'LISTA OFICIAL DO APP', descoberto: quando, origem, atualizado: quando };
+      banco.itens[id] = { id, tipo: 'I', desc: c.texto, freq: 0, peso: 1, sorteavel: origem === ORIGEM_OFICIAL || origem === ORIGEM_TRADUCAO, descoberto: quando, origem, atualizado: quando };
       if (novos) novos.push(c.texto);
     }
     return banco.itens[id];
@@ -147,7 +191,7 @@ function cadastrar_(banco, comps, origem, novos) {
   const id = idCombinacao_(partes.map(p => p.id.slice(2)));
   if (!banco.itens[id]) {
     const desc = escreverCombinacao_(partes.map(p => p.desc));
-    banco.itens[id] = { id, tipo: 'C', desc, comp: partes.map(p => p.id), freq: 0, peso: 1, sorteavel: origem === 'LISTA OFICIAL DO APP', descoberto: quando, origem, atualizado: quando };
+    banco.itens[id] = { id, tipo: 'C', desc, comp: partes.map(p => p.id), freq: 0, peso: 1, sorteavel: origem === ORIGEM_OFICIAL || origem === ORIGEM_TRADUCAO, descoberto: quando, origem, atualizado: quando };
     if (novos) novos.push(desc);
   }
   return banco.itens[id];
@@ -157,8 +201,10 @@ function cadastrar_(banco, comps, origem, novos) {
 function semearBanco_(banco) {
   DESCRICOES.forEach(d => {
     const comps = interpretarDescricao_(d);
-    if (comps) cadastrar_(banco, comps, 'LISTA OFICIAL DO APP');
+    if (comps) cadastrar_(banco, comps, ORIGEM_OFICIAL);
   });
+  // Destinos das traduções também são nomes oficiais
+  TRADUCOES.forEach(r => cadastrar_(banco, interpretarDescricao_(r.nome), ORIGEM_OFICIAL));
 }
 
 function lerBanco_() {
@@ -219,17 +265,33 @@ function lerHistorico_() {
 // Monta o banco novo a partir do antigo e das linhas lidas. Não apaga nada do antigo.
 function montarBanco_(antigo, linhas) {
   const banco = antigo ? JSON.parse(JSON.stringify(antigo)) : bancoVazio_();
-  if (!Object.keys(banco.itens).length) semearBanco_(banco);
-  const novos = [], freq = {}, nao = {}, recentes = new Set();
+  semearBanco_(banco); // não duplica: só cadastra o que falta da lista oficial
+  const novos = [], freq = {}, nao = {}, recentes = new Set(), traduzidas = {}, porTraducao = {};
+  const oficial = c => { const it = banco.itens['I:' + c.chave]; return !!it && it.origem === ORIGEM_OFICIAL; };
   linhas.forEach(l => {
     const comps = interpretarDescricao_(l.desc);
-    if (!comps) {
+    let item = null;
+    if (comps && comps.every(oficial)) {
+      item = cadastrar_(banco, comps, 'COLUNA F · ' + l.aba, novos); // já está em nomes oficiais
+    } else if (l.historica) {
+      // Texto livre antigo: traduz para os nomes oficiais só para contar a frequência
+      const nomes = traduzirDescricao_(l.desc);
+      if (nomes) {
+        item = cadastrar_(banco, nomes.map(n => ({ chave: semAcento_(n), texto: n })), ORIGEM_TRADUCAO, novos);
+        const k = semAcento_(l.desc);
+        traduzidas[k] = traduzidas[k] || { texto: textoOficial_(l.desc), para: item.desc, n: 0 };
+        traduzidas[k].n++;
+        porTraducao[item.id] = (porTraducao[item.id] || 0) + 1;
+      }
+    }
+    // Nome no padrão que ainda não é da lista: cadastra como está (sai no sorteio se usado depois de 28/02/2026)
+    if (!item && comps) item = cadastrar_(banco, comps, 'COLUNA F · ' + l.aba, novos);
+    if (!item) {
       const k = semAcento_(l.desc);
       nao[k] = nao[k] || { texto: textoOficial_(l.desc), n: 0, aba: l.aba };
       if (l.historica) nao[k].n++;
       return;
     }
-    const item = cadastrar_(banco, comps, 'COLUNA F · ' + l.aba, novos);
     if (l.historica) freq[item.id] = (freq[item.id] || 0) + 1;
     if (l.recente) recentes.add(item.id);
   });
@@ -237,11 +299,14 @@ function montarBanco_(antigo, linhas) {
   Object.keys(banco.itens).forEach(id => {
     const it = banco.itens[id], f = freq[id] || 0;
     if (it.freq !== f) { it.freq = f; it.atualizado = quando; }
+    it.freqTraduzida = porTraducao[id] || 0; // quanto da frequência veio de texto livre traduzido
     // Só sai no sorteio o que é nome oficial: a lista do app ou o que já foi usado depois de 28/02/2026,
     // quando as descrições passaram a ser padronizadas. Texto livre antigo fica só no histórico.
-    const pode = it.origem === 'LISTA OFICIAL DO APP' || recentes.has(id) || it.sorteavel === true;
+    const pode = it.origem === ORIGEM_OFICIAL || it.origem === ORIGEM_TRADUCAO || recentes.has(id) || it.sorteavel === true;
     if (it.sorteavel !== pode) { it.sorteavel = pode; it.atualizado = quando; }
   });
+  banco.traducoes = Object.keys(traduzidas).sort((a, b) => traduzidas[b].n - traduzidas[a].n).slice(0, MAX_TRADUCOES)
+    .map(k => traduzidas[k]);
   banco.naoInterpretadas = {};
   Object.keys(nao).sort((a, b) => nao[b].n - nao[a].n).slice(0, MAX_NAO_INTERPRETADAS)
     .forEach(k => { banco.naoInterpretadas[k] = nao[k]; });
@@ -355,6 +420,7 @@ function painelBanco() {
     soHistorico: todos.filter(i => i.sorteavel === false).sort(ordem).slice(0, 60).map(linha),
     medianas: b.medianas, pesosEm: b.pesosEm, leitura: b.leitura,
     naoInterpretadas: Object.keys(b.naoInterpretadas || {}).map(k => b.naoInterpretadas[k]).slice(0, 30),
+    traducoes: (b.traducoes || []).slice(0, 40),
     log: (lerGrande_('LOG') || []).slice(0, 10)
   };
 }

@@ -27,6 +27,9 @@ frequência histórica, peso, se pode sair no sorteio, data da descoberta, orige
 
 - **Frequência**: coluna F da planilha original (`HISTORICO_ID`), só linhas até 28/02/2026, sem lançamentos do app
   (seriais gravados pelo app ficam em `APP_SERIAIS`). A planilha de destino nunca conta.
+- **Tradução do histórico**: o texto livre antigo ("REPARO WIFI NÃO FUNCIONA") é traduzido para os nomes oficiais
+  ("REPARO NA INTERFACE DE WIFI") só para contar frequência, pela tabela `TRADUCOES` em `src/Banco.gs`. Se alguma parte do
+  texto não tiver tradução, ele não conta para nenhum nome oficial. O painel (Ver banco) mostra as traduções feitas.
 - **Peso**: `P = 5,5 + 4,5 × tanh(ln((F + 1) / (M + 1)) / ln(10))`, entre 1 e 10, mediana `M` separada para
   individuais e combinações.
 - **Sorteio**: 30% combinações (arredondado) e o resto individuais; sem combinações, completa com individuais e anota no log.

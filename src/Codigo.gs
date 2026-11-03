@@ -611,6 +611,8 @@ const PAINEL_HTML = `<!doctype html>
       $('msgBanco').textContent = 'Frequência até 28/02/2026 · peso (1 a 10). Medianas: individuais ' + r.medianas.I + ', combinações ' + r.medianas.C + '.';
       $('banco').innerHTML = lista('Manutenções individuais', r.individuais) + lista('Combinações', r.combinacoes) +
         (r.soHistorico.length ? lista('Só no histórico (texto livre antigo, não sai no sorteio)', r.soHistorico) : '') +
+        (r.traducoes.length ? '<h2>Traduções do histórico (texto antigo → nome oficial)</h2>' + r.traducoes.map(x =>
+          '<div class="item"><span>' + esc(x.texto) + '<br><span class="comp">→ ' + esc(x.para) + '</span></span><span>' + x.n + '</span></div>').join('') : '') +
         (r.naoInterpretadas.length ? '<h2>Não interpretados (diagnóstico)</h2>' + r.naoInterpretadas.map(x =>
           '<div class="item"><span>' + esc(x.texto) + '</span><span>' + x.n + '</span></div>').join('') : '') +
         (r.log.length ? '<h2>Log</h2>' + r.log.map(x => '<div class="item"><span>' + esc(x.tipo + ': ' + x.msg) + '</span><span>' + esc(x.quando) + '</span></div>').join('') : '');

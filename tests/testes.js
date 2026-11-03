@@ -35,7 +35,8 @@ function cenario(op) {
     ['BRUNO', 'ACER', 'A315', 'H003', d(2026, 1, 7), 'TROCA DE BATERIA'],
     ['BRUNO', 'ACER', 'A315', 'H004', d(2026, 2, 7), 'REPARO NA INTERFACE DE VÍDEO E TROCA DE BATERIA'],
     ['BRUNO', 'ACER', 'A315', 'H005', d(2026, 2, 8), 'REPARO NA INTERFACE DE VIDEO, REDE E AUDIO'],
-    ['BRUNO', 'ACER', 'A315', 'H006', d(2026, 2, 9), 'REPARO WIFI NÃO FUNCIONA'],
+    ['BRUNO', 'ACER', 'A315', 'H006', d(2026, 2, 9), 'PESQUISA GOOGLE'],
+    ['BRUNO', 'ACER', 'A315', 'H009', d(2026, 2, 10), 'REPARO WIFI NÃO FUNCIONA'],
     ['BRUNO', 'ACER', 'A315', 'H007', d(2026, 3, 9), 'TROCA DE BATERIA'],
     ['BRUNO', 'ACER', 'A315', 'H008', d(2026, 4, 9), 'TROCA DE MÓDULO DA CÂMERA']
   ];
@@ -206,7 +207,7 @@ teste('7. Descrição inédita é cadastrada sozinha, sem ocorrências inventada
   assert.strictEqual(it.freq, 0, 'só aparece depois de 28/02/2026');
   assert.ok(it.peso >= 1 && it.peso <= 10);
   assert.ok(/COLUNA F/.test(it.origem) && it.descoberto, 'origem e data da descoberta');
-  assert.ok(banco(amb).naoInterpretadas['REPARO WIFI NAO FUNCIONA'], 'texto não interpretado guardado para diagnóstico');
+  assert.ok(banco(amb).naoInterpretadas['PESQUISA GOOGLE'], 'texto não interpretado guardado para diagnóstico');
 });
 
 teste('8. Histórico só até 28/02/2026', () => {
@@ -309,6 +310,26 @@ teste('14. Dados existentes preservados e nenhuma aba além dos meses', () => {
     .forEach(l => assert.ok(nomes.has(l[5]), 'descrição fora do banco: ' + l[5])));
   // técnico do app
   assert.ok(p.getSheetByName('OUTUBRO 2026').dados.slice(1).every(l => l[0] === 'JOÃO PEDRO'));
+});
+
+teste('Tradução: texto livre antigo conta para o nome oficial, sem cadastrar o texto livre', () => {
+  const amb = cenario();
+  const tr = t => amb.rodar(`JSON.stringify(traduzirDescricao_(${JSON.stringify(t)}))`);
+  assert.strictEqual(tr('REPARO WIFI NÃO FUNCIONA'), '["REPARO NA INTERFACE DE WIFI"]');
+  assert.strictEqual(tr('PLACA DE AUDIO NÃO FUNCIONA'), '["REPARO NA INTERFACE DE ÁUDIO"]');
+  assert.strictEqual(tr('REDES WIFI NÃO APARECEM'), '["REPARO NA INTERFACE DE WIFI"]');
+  assert.strictEqual(tr('SSD NÃO APARECE NA BIOS'), '["REPARO NA INTERFACE DE INICIALIZAÇÃO"]');
+  assert.strictEqual(tr('TROCA DE BATERIA E SSD'), '["TROCA DE BATERIA","TROCA DE SSD"]');
+  assert.strictEqual(tr('WIFI NÃO CONECTA E MICROFONE ESTOURADO'), '["REPARO NA INTERFACE DE WIFI","REPARO NA INTERFACE DE ÁUDIO"]');
+  assert.strictEqual(tr('TROCA DE TECLADO E FORMATAÇÃO'), 'null', 'parte sem tradução: não traduz');
+  assert.strictEqual(tr('PESQUISA GOOGLE'), 'null');
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  const b = banco(amb);
+  const wifi = b.itens['I:REPARO NA INTERFACE DE WIFI'];
+  assert.strictEqual(wifi.freq, 1);
+  assert.strictEqual(wifi.freqTraduzida, 1);
+  assert.ok(!Object.values(b.itens).some(i => /NAO FUNCIONA|NÃO FUNCIONA/.test(i.desc)), 'texto livre virou cadastro');
+  assert.ok(b.traducoes.some(t => t.para === 'REPARO NA INTERFACE DE WIFI'));
 });
 
 teste('Painel: consulta ao banco e resumo', () => {
