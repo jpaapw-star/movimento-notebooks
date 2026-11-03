@@ -549,7 +549,8 @@ const PAINEL_HTML = `<!doctype html>
   }
   const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   ferramenta('analisar', 'painelAnalise', 'Analisando…', r => {
-    $('msgFerr').textContent = r.mes + ': ' + r.total + ' manutenções com o seu nome.';
+    $('msgFerr').textContent = r.mes + ': ' + r.total + ' notebooks com o seu nome, ' + r.servicos +
+      ' serviços (' + r.combinados + ' notebooks com mais de um serviço).';
     $('analise').innerHTML = r.lista.map(x => '<div><span>' + esc(x.desc) + '</span><span>' + x.n + '</span></div>').join('');
   });
   ferramenta('formatar', 'painelFormatar', 'Arrumando a formatação…', t => $('msgFerr').textContent = t);
