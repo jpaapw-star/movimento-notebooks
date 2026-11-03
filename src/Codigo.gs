@@ -466,6 +466,11 @@ const PAINEL_HTML = `<!doctype html>
   select, input[type=text] { background:var(--fundo); color:var(--texto); border:1px solid var(--linha); }
   button { margin-top:10px; border:0; background:var(--botao); color:var(--botao-txt); font-weight:600; cursor:pointer; }
   button:disabled { opacity:.4; }
+  button.leve { background:transparent; color:var(--texto); border:1px solid var(--linha); font-weight:500; }
+  .botoes { display:flex; gap:8px; }
+  .botoes button { flex:1; }
+  #analise { margin-top:8px; }
+  #analise div { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid var(--linha); gap:12px; }
   .linha { display:flex; justify-content:space-between; align-items:center;
     padding:14px 0; border-top:1px solid var(--linha); margin-top:20px; }
   .suave { color:var(--suave); font-size:12px; margin-top:8px; min-height:16px; }
@@ -482,6 +487,13 @@ const PAINEL_HTML = `<!doctype html>
   <select id="mes"><option>Carregando…</option></select>
   <button id="gerar" disabled>Sortear metade</button>
   <div class="suave" id="msg"></div>
+  <div class="botoes">
+    <button class="leve" id="analisar" disabled>Análise</button>
+    <button class="leve" id="formatar" disabled>Formatação</button>
+    <button class="leve" id="ortografia" disabled>Ortografia</button>
+  </div>
+  <div class="suave" id="msgFerr"></div>
+  <div id="analise"></div>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
   <div class="suave">Duas vezes por dia (a cada 12 horas) sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
   <div class="suave" id="ultima"></div>
@@ -498,6 +510,7 @@ const PAINEL_HTML = `<!doctype html>
       $('mes').innerHTML = d.meses.map(m =>
         '<option value="' + m.nome + '">' + m.nome + ' · ' + m.feitos + ' de ' + m.total + '</option>').join('');
       $('auto').checked = d.auto; $('auto').disabled = false; $('gerar').disabled = !d.meses.length;
+      ['analisar', 'formatar', 'ortografia'].forEach(b => $(b).disabled = !d.meses.length);
       $('link').href = d.url; $('link').textContent = d.destino; $('link').hidden = false;
       const u = d.ultima;
       $('ultima').textContent = !u ? '' : 'Última rodada: ' + u.quando + ' · ' +
@@ -526,6 +539,21 @@ const PAINEL_HTML = `<!doctype html>
       .withFailureHandler(e => { $('msg').textContent = e.message; $('auto').disabled = false; })
       .painelAuto($('auto').checked);
   };
+  function ferramenta(botao, funcao, aguarde, pronto) {
+    $(botao).onclick = () => {
+      const mes = $('mes').value;
+      $(botao).disabled = true; $('msgFerr').textContent = aguarde; $('analise').innerHTML = '';
+      google.script.run.withSuccessHandler(r => { $(botao).disabled = false; pronto(r); })
+        .withFailureHandler(e => { $(botao).disabled = false; $('msgFerr').textContent = e.message; })[funcao](mes);
+    };
+  }
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  ferramenta('analisar', 'painelAnalise', 'Analisando…', r => {
+    $('msgFerr').textContent = r.mes + ': ' + r.total + ' manutenções com o seu nome.';
+    $('analise').innerHTML = r.lista.map(x => '<div><span>' + esc(x.desc) + '</span><span>' + x.n + '</span></div>').join('');
+  });
+  ferramenta('formatar', 'painelFormatar', 'Arrumando a formatação…', t => $('msgFerr').textContent = t);
+  ferramenta('ortografia', 'painelOrtografia', 'Corrigindo a ortografia…', t => $('msgFerr').textContent = t);
   $('trocar').onclick = () => {
     $('trocar').disabled = true; $('msgDestino').textContent = 'Conferindo a planilha…';
     google.script.run.withSuccessHandler(t => {
