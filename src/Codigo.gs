@@ -1,11 +1,20 @@
+// ===================== PLANILHAS =====================
+// Todas as planilhas usadas pelo app ficam só aqui (código de compartilhamento = ID do link).
+// Qualidade: de onde vêm os notebooks (só leitura, nunca alterada)
+const ORIGEM_ID = '1JHONHaipHAKmtkcQ_7mm8VXA-h-LBQuu-I8uzPhjgDQ';
+const ORIGEM_ABA = 'TabelaQualidade';
+// Manutenções original: os lançamentos dos colegas vêm dela (só leitura, nunca alterada)
+const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
+// Cópia de teste: única planilha onde o app grava (só nas abas de mês)
+const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
+// ======================================================
+
 /**
  * Transportar notebooks
- * Lê os notebooks da planilha "CONTROLE DE QUALIDADE INFORMATICA EMANX"
- * (aba TabelaQualidade) e grava na CÓPIA DE TESTE das manutenções (TESTE_ID),
- * nas abas de mês (ex.: "OUTUBRO 2026"), sempre em ordem de data.
+ * Lê os notebooks da planilha de qualidade e grava na cópia de teste,
+ * nas abas de mês (ex.: "OUTUBRO 2026"), sempre em ordem de data. Não cria nenhuma outra aba.
  * Cópia viva: as linhas que os colegas lançam na planilha de manutenções original
  * são copiadas para a cópia de teste a cada rodada.
- * A planilha de qualidade e a de manutenções original só são lidas, nunca alteradas.
  *
  * - Por mês: sorteia metade dos notebooks lançados naquele mês
  * - Nunca escolhe serial que já existe na planilha original ou na cópia de teste
@@ -15,15 +24,10 @@
  * - Painel (menu Notebooks › Abrir painel): escolher um mês e gerar na hora,
  *   e ligar o modo automático (a cada 10 min sorteia os notebooks novos do mês atual
  *   e dos meses já gerados, sempre mantendo metade)
- * - App web: o mesmo painel em tela cheia (Implantar › Nova implantação › App da Web)
+ * - App web: o mesmo painel em tela cheia
  */
 
-const ORIGEM_ID = '1JHONHaipHAKmtkcQ_7mm8VXA-h-LBQuu-I8uzPhjgDQ';
-const ORIGEM_ABA = 'TabelaQualidade';
-const MANUTENCOES_ID = '10zHHWjV6Xva7ojDr7GpGRe_NuJufYZ62qhpwhMU3Hcs';
 const TECNICO = 'JOÃO PEDRO';
-// Cópia de teste (do João): única planilha onde o app grava
-const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
 const SIMULACAO_CAB = ['TÉCNICO', 'MARCA', 'MODELO', 'SERIAL', 'DATA', 'DESCRIÇÃO'];
 
 // [descrição, peso]: peso maior sai mais vezes
@@ -508,7 +512,8 @@ const PAINEL_HTML = `<!doctype html>
       const c = d.scan;
       $('scan').textContent = !d.memoria ? 'Memória Global: falta a chave (marca/modelo e SCAN desligados).' :
         d.erroMg ? 'Memória Global não respondeu: ' + d.erroMg :
-        !c ? '' : 'Conferência SCAN: ' + c.ok + ' ok · ' + c.conferir + ' para conferir · ' + c.fora + ' não passaram pelo SCAN';
+        !c ? '' : 'Conferência SCAN: ' + c.ok + ' ok · ' + c.conferir + ' para conferir · ' + c.fora + ' não passaram pelo SCAN' +
+          (c.lista && c.lista.length ? '. Conferir: ' + c.lista.join(', ') : '');
     }).withFailureHandler(e => $('msg').textContent = e.message).painelDados();
   }
   $('gerar').onclick = () => {
