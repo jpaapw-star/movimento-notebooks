@@ -23,7 +23,7 @@ const TESTE_ID = '1yofc6A_iIdjozQZGpeIpoh9hlP9ZKUyJmFO9d-Bdg70';
  * - Descrição: sorteada com pesos (troca de tela sai pouco)
  * - Pula linhas sem data ou sem serial, e o que não é notebook (monitor, console, controle...)
  * - Painel (menu Notebooks › Abrir painel): escolher um mês e gerar na hora,
- *   e ligar o modo automático (a cada 10 min sorteia os notebooks novos do mês atual
+ *   e ligar o modo automático (2 vezes por dia, a cada 12 h, sorteia os notebooks novos do mês atual
  *   e dos meses já gerados, sempre mantendo metade)
  * - App web: o mesmo painel em tela cheia
  */
@@ -92,6 +92,7 @@ function props_() {
 
 // Chamado pelo painel: lista dos meses e estado do automático
 function painelDados() {
+  ajustarTriggerAuto_();
   const plano = montarPlano_([planilhaManutencoes_(), abrirSimulacao_()], []);
   const meses = Object.keys(plano.resumo)
     .sort((a, b) => plano.resumo[b].ordem - plano.resumo[a].ordem)
@@ -148,13 +149,29 @@ function painelGerar(mes) {
 
 function painelAuto(ligar) {
   const t = triggerAuto_();
-  if (ligar && !t) ScriptApp.newTrigger('automatico').timeBased().everyMinutes(10).create();
+  if (ligar && !t) criarTriggerAuto_();
   if (!ligar && t) ScriptApp.deleteTrigger(t);
   return ligar;
 }
 
-// Roda sozinho a cada 10 min: mês atual + meses já gerados
+const AUTO_HORAS = 12; // automático roda 2 vezes por dia
+
+function criarTriggerAuto_() {
+  ScriptApp.newTrigger('automatico').timeBased().everyHours(AUTO_HORAS).create();
+  props_().setProperty('AUTO_HORAS', String(AUTO_HORAS));
+}
+
+// Gatilho criado por versão antiga (a cada 10 min): troca pelo de 12 h
+function ajustarTriggerAuto_() {
+  const t = triggerAuto_();
+  if (!t || props_().getProperty('AUTO_HORAS') === String(AUTO_HORAS)) return;
+  ScriptApp.deleteTrigger(t);
+  criarTriggerAuto_();
+}
+
+// Roda sozinho 2 vezes por dia: mês atual + meses já gerados
 function automatico() {
+  ajustarTriggerAuto_();
   const hoje = new Date();
   const atual = MESES[hoje.getMonth()] + ' ' + hoje.getFullYear();
   const seguidos = JSON.parse(props_().getProperty('MESES_AUTO') || '[]');
@@ -523,7 +540,7 @@ const PAINEL_HTML = `<!doctype html>
   <button id="gerar" disabled>Sortear metade</button>
   <div class="suave" id="msg"></div>
   <div class="linha"><span>Automático</span><input type="checkbox" id="auto" disabled></div>
-  <div class="suave">A cada 10 minutos sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
+  <div class="suave">Duas vezes por dia (a cada 12 horas) sorteia os notebooks novos do mês atual e dos meses já gerados.</div>
   <div class="suave" id="ultima"></div>
   <div class="suave" id="scan"></div>
   <div class="linha"><span>Planilha de destino</span></div>
