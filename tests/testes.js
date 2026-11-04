@@ -379,6 +379,10 @@ teste('Ordenar por data: todas as abas de mês, datas em texto e com hora, sem m
   igual(p.getSheetByName('SETEMBRO 2026').dados.slice(1).map(l => l[3]), ['T2', 'T1']);
   assert.strictEqual(p.getSheetByName('Outra aba').dados[1][0].getDate(), 20, 'mexeu em aba que não é de mês');
   assert.ok(/já estavam/.test(amb.rodar('painelOrdenar()')));
+  // largura de cada coluna acompanha o texto mais comprido
+  const l = out.larguras;
+  assert.ok(l[6] > l[1], 'DESCRIÇÃO deveria ser mais larga que TÉCNICO');
+  assert.strictEqual(l[1], 7 * 'TÉCNICO'.length + 10 + 16);
 });
 
 teste('Painel: consulta ao banco e resumo', () => {

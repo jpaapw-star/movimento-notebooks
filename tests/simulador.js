@@ -90,6 +90,16 @@ function criarAmbiente() {
       if (c + (nc || 1) - 1 > this.getMaxColumns()) throw new Error('Faixa fora da grade');
       return new Faixa(this, r, c, nr || 1, nc || 1);
     }
+    autoResizeColumns(c, n) {
+      this.planilha.escrever();
+      this.larguras = this.larguras || {};
+      for (let j = c; j < c + n; j++) {
+        const maior = Math.max(0, ...this.dados.map(l => String((l || [])[j - 1] === undefined ? '' : (l || [])[j - 1]).length));
+        this.larguras[j] = 7 * maior + 10;
+      }
+    }
+    getColumnWidth(c) { return (this.larguras || {})[c] || 100; }
+    setColumnWidth(c, w) { this.planilha.escrever(); (this.larguras = this.larguras || {})[c] = w; }
     getMaxColumns() { return this.maxColunas || Math.max(this.getLastColumn(), 26); }
     insertColumnsAfter(c, n) { this.planilha.escrever(); this.maxColunas = this.getMaxColumns() + n; }
     deleteColumn(c) { this.planilha.escrever(); this.dados.forEach(l => l && l.splice(c - 1, 1)); this.maxColunas = this.getMaxColumns() - 1; }

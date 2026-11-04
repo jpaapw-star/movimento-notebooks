@@ -81,7 +81,8 @@ function painelFormatar(mes) {
       .setFontFamily(cab.getFontFamily()).setFontSize(cab.getFontSize());
     if (col.data >= 0) aba.getRange(2, col.data + 1, n, 1).setNumberFormat('dd/MM/yyyy');
     aba.setFrozenRows(1);
-    return 'Formatação arrumada em ' + mes + ': ' + mudou + ' célula(s) corrigida(s), alinhamento, fonte e datas padronizados.';
+    ajustarLarguras_(aba);
+    return 'Formatação arrumada em ' + mes + ': ' + mudou + ' célula(s) corrigida(s), alinhamento, fonte, datas e largura das colunas padronizados.';
   } finally {
     trava.releaseLock();
   }

@@ -335,9 +335,22 @@ function ordenarPorData_(aba) {
   return true;
 }
 
-// Ordena por data todas as abas de mês da planilha de destino. Devolve quantas mudaram.
+const FOLGA_COLUNA = 16; // pixels a mais depois de ajustar a largura ao texto
+
+// Cada coluna da aba fica da largura do texto mais comprido (com uma pequena folga)
+function ajustarLarguras_(aba) {
+  const n = aba.getLastColumn();
+  if (!n) return;
+  aba.autoResizeColumns(1, n);
+  for (let c = 1; c <= n; c++) aba.setColumnWidth(c, aba.getColumnWidth(c) + FOLGA_COLUNA);
+}
+
+// Ordena por data e ajusta a largura das colunas em todas as abas de mês. Devolve quantas mudaram de ordem.
 function ordenarTodasAsAbas_(planilha) {
-  return planilha.getSheets().filter(a => ehAbaDeMes_(a.getName())).filter(ordenarPorData_).length;
+  const abas = planilha.getSheets().filter(a => ehAbaDeMes_(a.getName()));
+  const n = abas.filter(ordenarPorData_).length;
+  abas.forEach(ajustarLarguras_);
+  return n;
 }
 
 // Chamado pelo painel: ordena por data todas as abas de mês
@@ -346,7 +359,8 @@ function painelOrdenar() {
   if (!trava.tryLock(30000)) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
   try {
     const n = ordenarTodasAsAbas_(abrirSimulacao_());
-    return n ? n + ' aba(s) de mês colocada(s) em ordem de data.' : 'Todas as abas de mês já estavam em ordem de data.';
+    return (n ? n + ' aba(s) de mês colocada(s) em ordem de data.' : 'Todas as abas de mês já estavam em ordem de data.') +
+      ' Colunas ajustadas ao tamanho do texto.';
   } finally {
     trava.releaseLock();
   }
@@ -575,7 +589,7 @@ const PAINEL_HTML = `<!doctype html>
     <button class="leve" id="ortografia" disabled>Ortografia</button>
   </div>
   <div class="botoes">
-    <button class="leve" id="ordenar">Ordenar por data (todas as abas)</button>
+    <button class="leve" id="ordenar">Organizar planilha (data e largura)</button>
   </div>
   <div class="suave" id="msgFerr"></div>
   <div id="analise"></div>
@@ -652,7 +666,7 @@ const PAINEL_HTML = `<!doctype html>
   });
   ferramenta('formatar', 'painelFormatar', 'Arrumando a formatação…', t => $('msgFerr').textContent = t);
   ferramenta('ortografia', 'painelOrtografia', 'Corrigindo a ortografia…', t => $('msgFerr').textContent = t);
-  ferramenta('ordenar', 'painelOrdenar', 'Ordenando todas as abas por data…', t => $('msgFerr').textContent = t);
+  ferramenta('ordenar', 'painelOrdenar', 'Organizando todas as abas de mês…', t => $('msgFerr').textContent = t);
   const lista = (titulo, itens) => '<h2>' + esc(titulo) + '</h2>' + itens.map(x =>
     '<div class="item"><span>' + esc(x.desc) + (x.comp && x.comp.length ? '<br><span class="comp">' + x.comp.map(esc).join(' + ') + '</span>' : '') +
     '</span><span>' + x.freq + ' · ' + x.peso + '</span></div>').join('');
