@@ -469,7 +469,8 @@ function painelAtualizarBanco() {
   try {
     const r = atualizarBancoSemTrava_(true);
     const l = r.banco.leitura;
-    return 'Banco atualizado: ' + l.linhas + ' linhas lidas, ' + l.novos + ' cadastro(s) novo(s).';
+    return 'Banco atualizado: ' + l.linhas + ' linhas lidas (' + l.historicas + ' até 28/02/2026, que contam nos pesos), ' +
+      l.novos + ' cadastro(s) novo(s).';
   } finally {
     trava.releaseLock();
   }

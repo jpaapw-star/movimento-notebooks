@@ -406,6 +406,19 @@ teste('Positivo nunca recebe TROCA DE TECLADO, nem dentro de combinação', () =
   assert.strictEqual(r.d.ind + r.d.comb, 3000);
 });
 
+teste('Datas vindas de outra planilha (outro contexto) contam no histórico', () => {
+  // Date de fora do simulador não passa em "instanceof Date" lá dentro, como acontece no Apps Script
+  const amb = cenario({ historico: () => [
+    ['A', 'ACER', 'X', 'H1', new Date(2026, 0, 5), 'TROCA DE BATERIA'],
+    ['A', 'ACER', 'X', 'H2', new Date(2026, 0, 6), 'REPARO WIFI NÃO FUNCIONA']] });
+  assert.strictEqual(amb.rodar('(v => v instanceof Date)')(new Date()), false, 'o teste precisa de data de outro contexto');
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  const b = banco(amb);
+  assert.strictEqual(b.leitura.historicas, 2);
+  assert.strictEqual(b.itens['I:TROCA DE BATERIA'].freq, 1);
+  assert.strictEqual(b.itens['I:REPARO NA INTERFACE DE REDE'].freq, 1);
+});
+
 teste('Painel: consulta ao banco e resumo', () => {
   const amb = cenario();
   amb.rodar('atualizarBancoSemTrava_(true)');

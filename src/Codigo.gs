@@ -299,7 +299,7 @@ function momentoDaData_(v) {
   const d = lerData_(v, true);
   if (!d) return null;
   let min = 0;
-  if (v instanceof Date) min = v.getHours() * 60 + v.getMinutes();
+  if (ehData_(v)) min = v.getHours() * 60 + v.getMinutes();
   else {
     const h = String(v).match(/\b(\d{1,2}):(\d{2})\b/);
     if (h) min = +h[1] * 60 + +h[2];
@@ -532,11 +532,16 @@ function marcaFinal_(marca, desc) {
   return achada || m;
 }
 
+// Data vinda de outra planilha nem sempre passa em "instanceof Date" (é de outro contexto do Apps Script)
+function ehData_(v) {
+  return v instanceof Date || Object.prototype.toString.call(v) === '[object Date]';
+}
+
 // Aceita data do Sheets, "dd/mm/aaaa" ou "aaaa-mm-dd"; recusa data impossível ou no futuro.
 // qualquerAno: aceita também datas antes de 2024 (histórico da planilha original)
 function lerData_(v, qualquerAno) {
   let d = null;
-  if (v instanceof Date && !isNaN(v)) d = new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (ehData_(v)) { if (!isNaN(v)) d = new Date(v.getFullYear(), v.getMonth(), v.getDate()); }
   else {
     const t = String(v || '');
     let m = t.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
