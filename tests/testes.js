@@ -355,6 +355,87 @@ teste('Inicialização e formatação do sistema são a mesma manutenção', () 
   assert.strictEqual(c.desc, 'FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO');
 });
 
+teste('Ordenar por data: todas as abas de mês, datas em texto e com hora, sem mudar valores', () => {
+  const amb = cenario({ destino: d => ({
+    'OUTUBRO 2026': [CAB_DESTINO.concat(['OBS']),
+      ['A', 'ACER', 'X', 'S1', d(2026, 10, 22), 'TROCA DE TELA', 'x'],
+      ['B', 'ACER', 'X', 'S2', '31/10/2026 08:57', 'TROCA DE SSD', ''],
+      ['C', 'ACER', 'X', 'S3', d(2026, 10, 13), 'TROCA DE SSD', ''],
+      ['D', 'ACER', 'X', 'S4', '', 'SEM DATA', ''],
+      ['E', 'ACER', 'X', 'S5', '31/10/2026 08:56', 'TROCA DE SSD', ''],
+      ['F', 'ACER', 'X', 'S6', '16/10/2026', 'TROCA DE SSD', '']],
+    'SETEMBRO 2026': [CAB_DESTINO, ['A', 'ACER', 'X', 'T1', d(2026, 9, 20), 'X'], ['B', 'ACER', 'X', 'T2', d(2026, 9, 2), 'X']],
+    'Outra aba': [['DATA'], [d(2026, 9, 20)], [d(2026, 9, 2)]] }) });
+  const p = amb.planilhas[TESTE_ID];
+  p.getSheetByName('OUTUBRO 2026').maxColunas = 7; // sem coluna sobrando: usa coluna temporária
+  const antesOut = p.getSheetByName('OUTUBRO 2026').dados.slice(1).map(l => JSON.stringify(l)).sort();
+  const msg = amb.rodar('painelOrdenar()');
+  assert.ok(/2 aba/.test(msg), msg);
+  const out = p.getSheetByName('OUTUBRO 2026');
+  igual(out.dados.slice(1).map(l => l[3]), ['S3', 'S6', 'S1', 'S5', 'S2', 'S4']);
+  igual(out.dados.slice(1).map(l => JSON.stringify(l.slice(0, 7))).sort(), antesOut, 'valores mudaram');
+  assert.strictEqual(out.getMaxColumns(), 7, 'coluna temporária ficou');
+  assert.ok(out.dados.every(l => l.length <= 7 || l.slice(7).every(x => x === '')), 'sobrou chave');
+  igual(p.getSheetByName('SETEMBRO 2026').dados.slice(1).map(l => l[3]), ['T2', 'T1']);
+  assert.strictEqual(p.getSheetByName('Outra aba').dados[1][0].getDate(), 20, 'mexeu em aba que não é de mês');
+  assert.ok(/já estavam/.test(amb.rodar('painelOrdenar()')));
+  // largura de cada coluna acompanha o texto mais comprido
+  const l = out.larguras;
+  assert.ok(l[6] > l[1], 'DESCRIÇÃO deveria ser mais larga que TÉCNICO');
+  assert.strictEqual(l[1], 7 * 'TÉCNICO'.length + 10 + 16);
+  // bordas em tudo o que está preenchido: cabeçalho + 6 linhas x 7 colunas, todos os lados
+  const b = out.bordas[out.bordas.length - 1];
+  igual({ r: b.r, c: b.c, nr: b.nr, nc: b.nc, lados: b.lados }, { r: 1, c: 1, nr: 7, nc: 7, lados: [true, true, true, true, true, true] });
+  assert.ok(!p.getSheetByName('Outra aba').bordas, 'bordas em aba que não é de mês');
+});
+
+teste('Positivo nunca recebe TROCA DE TECLADO, nem dentro de combinação', () => {
+  const amb = cenario({ historico: d => [
+    ['A', 'ACER', 'X', 'H1', d(2026, 1, 5), 'TROCA DE TECLADO'],
+    ['A', 'ACER', 'X', 'H2', d(2026, 4, 5), 'TROCA DE TECLADO'],
+    ['A', 'ACER', 'X', 'H3', d(2026, 4, 6), 'TROCA DE SSD E TECLADO']] });
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  const r = amb.rodar(`(() => { const b = lerBanco_();
+    const pos = Array.from({ length: 3000 }, () => ({ marca: 'POSITIVO' }));
+    const acer = Array.from({ length: 3000 }, () => ({ marca: 'ACER' }));
+    const d = atribuirDescricoes_(pos, b); atribuirDescricoes_(acer, b);
+    return { pos: pos.map(x => x.desc), acer: acer.map(x => x.desc), d }; })()`);
+  assert.ok(!r.pos.some(t => /TECLADO/.test(t) && /TROCA/.test(t) && !/REPARO NA INTERFACE DE TECLADO/.test(t)), 'Positivo recebeu troca de teclado');
+  assert.ok(r.acer.some(t => t === 'TROCA DE TECLADO'), 'outras marcas continuam podendo');
+  assert.ok(r.acer.some(t => t === 'TROCA DE SSD E TECLADO'));
+  assert.strictEqual(r.d.ind + r.d.comb, 3000);
+});
+
+teste('Datas vindas de outra planilha (outro contexto) contam no histórico', () => {
+  // Date de fora do simulador não passa em "instanceof Date" lá dentro, como acontece no Apps Script
+  const amb = cenario({ historico: () => [
+    ['A', 'ACER', 'X', 'H1', new Date(2026, 0, 5), 'TROCA DE BATERIA'],
+    ['A', 'ACER', 'X', 'H2', new Date(2026, 0, 6), 'REPARO WIFI NÃO FUNCIONA']] });
+  assert.strictEqual(amb.rodar('(v => v instanceof Date)')(new Date()), false, 'o teste precisa de data de outro contexto');
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  const b = banco(amb);
+  assert.strictEqual(b.leitura.historicas, 2);
+  assert.strictEqual(b.itens['I:TROCA DE BATERIA'].freq, 1);
+  assert.strictEqual(b.itens['I:REPARO NA INTERFACE DE REDE'].freq, 1);
+});
+
+teste('Compatibilidade: troca nunca feita num modelo com histórico não sai para ele', () => {
+  const amb = cenario({ historico: d => {
+    const h = [];
+    // família "ACER A315": 30 manutenções, muita troca de SSD e nenhuma de memória
+    for (let i = 0; i < 30; i++) h.push(['A', 'ACER', 'A315-510P', 'A' + i, d(2026, 1, 1 + (i % 28)), i % 2 ? 'TROCA DE SSD' : 'REPARO NA INTERFACE DE ÁUDIO']);
+    // outra família faz troca de memória várias vezes (troca comum)
+    for (let i = 0; i < 12; i++) h.push(['B', 'DELL', 'I15-I1300', 'D' + i, d(2026, 1, 1 + i), 'TROCA DE MEMÓRIA RAM']);
+    return h; } });
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  assert.strictEqual(amb.rodar(`familiaModelo_('ACER', 'Aspire A315-510P-34XC')`), 'ACER A315');
+  assert.strictEqual(amb.rodar(`familiaModelo_('POSITIVO', 'DUO C4128B-3')`), 'POSITIVO C4128');
+  const r = amb.rodar(`(() => { const b = lerBanco_(); const ram = b.itens['I:TROCA DE MEMORIA RAM'], ssd = b.itens['I:TROCA DE SSD'], aud = b.itens['I:REPARO NA INTERFACE DE AUDIO'];
+    const acer = { marca: 'ACER', modelo: 'A315-510P-34XC' }, dell = { marca: 'DELL', modelo: 'I15-I1300-A15P' }, novo = { marca: 'ACER', modelo: 'SWIFT SF314' };
+    return [permitidaPara_(ram, acer, b), permitidaPara_(ssd, acer, b), permitidaPara_(aud, acer, b), permitidaPara_(ram, dell, b), permitidaPara_(ram, novo, b)]; })()`);
+  igual(r, [false, true, true, true, true]);
+});
+
 teste('Painel: consulta ao banco e resumo', () => {
   const amb = cenario();
   amb.rodar('atualizarBancoSemTrava_(true)');

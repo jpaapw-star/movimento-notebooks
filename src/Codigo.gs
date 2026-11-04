@@ -246,7 +246,7 @@ function gerar_(meses, pularSeIgual) {
       n += plano.porAba[nome].length;
       tocadas.add(nome);
     });
-    tocadas.forEach(nome => ordenarPorData_(simulacao.getSheetByName(nome)));
+    ordenarTodasAsAbas_(simulacao); // toda a planilha, não só as abas que receberam linhas
     if (!n && !tocadas.size) props_().setProperty('ASSINATURA', assinatura);
     registrarRodada_(n, '');
     return n;
@@ -293,14 +293,85 @@ function ehAbaDeMes_(nome) {
   return !!m && MESES.indexOf(m[1]) >= 0;
 }
 
-// Ordena as linhas da aba pela coluna DATA (cabeçalho fica na linha 1)
+// Momento da DATA para ordenar (em minutos): aceita data do Sheets ou texto "dd/mm/aaaa",
+// com ou sem hora ("31/10/2026 08:56"). Sem data reconhecida: null.
+function momentoDaData_(v) {
+  const d = lerData_(v, true);
+  if (!d) return null;
+  let min = 0;
+  if (ehData_(v)) min = v.getHours() * 60 + v.getMinutes();
+  else {
+    const h = String(v).match(/\b(\d{1,2}):(\d{2})\b/);
+    if (h) min = +h[1] * 60 + +h[2];
+  }
+  return Math.round(d.getTime() / 6e4) + min;
+}
+
+// Ordena as linhas da aba pela DATA (cabeçalho fica na linha 1). Datas em texto e com hora entram na
+// ordem certa; linhas sem data vão para o fim; empate mantém a ordem atual. Os valores não mudam.
+// Usa uma coluna auxiliar temporária com a chave, para o Sheets mover junto formatação e fórmulas.
+// Devolve true se mudou a ordem.
 function ordenarPorData_(aba) {
   const col = colunas_(aba);
-  if (col.data < 0) return;
+  if (col.data < 0) return false;
   const largura = aba.getLastColumn();
   const ultima = ultimaLinhaComDados_(aba, largura);
-  if (ultima < 3) return;
-  aba.getRange(2, 1, ultima - 1, largura).sort({ column: col.data + 1, ascending: true });
+  if (ultima < 3) return false;
+  const datas = aba.getRange(2, col.data + 1, ultima - 1, 1).getValues();
+  const chaves = datas.map((l, i) => {
+    const m = momentoDaData_(l[0]);
+    return (m === null ? 9e7 : m) * 1e5 + i; // sem data no fim; i desempata
+  });
+  if (chaves.every((k, i) => !i || k > chaves[i - 1])) return false; // já está em ordem
+  const auxiliar = largura + 1;
+  const inseriu = aba.getMaxColumns() < auxiliar;
+  if (inseriu) aba.insertColumnsAfter(largura, 1);
+  try {
+    aba.getRange(2, auxiliar, chaves.length, 1).setValues(chaves.map(k => [k]));
+    aba.getRange(2, 1, ultima - 1, auxiliar).sort({ column: auxiliar, ascending: true });
+  } finally {
+    if (inseriu) aba.deleteColumn(auxiliar); else aba.getRange(2, auxiliar, chaves.length, 1).clearContent();
+  }
+  return true;
+}
+
+const FOLGA_COLUNA = 16; // pixels a mais depois de ajustar a largura ao texto
+
+// Cada coluna da aba fica da largura do texto mais comprido (com uma pequena folga)
+function ajustarLarguras_(aba) {
+  const n = aba.getLastColumn();
+  if (!n) return;
+  aba.autoResizeColumns(1, n);
+  for (let c = 1; c <= n; c++) aba.setColumnWidth(c, aba.getColumnWidth(c) + FOLGA_COLUNA);
+}
+
+// Todas as bordas (por fora e entre as células) em tudo o que está preenchido, do cabeçalho à última linha
+function colocarBordas_(aba) {
+  const largura = aba.getLastColumn();
+  if (!largura) return;
+  const ultima = ultimaLinhaComDados_(aba, largura);
+  aba.getRange(1, 1, ultima, largura).setBorder(true, true, true, true, true, true);
+}
+
+// Ordena por data, ajusta a largura das colunas e coloca as bordas em todas as abas de mês. Devolve quantas mudaram de ordem.
+function ordenarTodasAsAbas_(planilha) {
+  const abas = planilha.getSheets().filter(a => ehAbaDeMes_(a.getName()));
+  const n = abas.filter(ordenarPorData_).length;
+  abas.forEach(a => { ajustarLarguras_(a); colocarBordas_(a); });
+  return n;
+}
+
+// Chamado pelo painel: ordena por data todas as abas de mês
+function painelOrdenar() {
+  const trava = LockService.getScriptLock();
+  if (!trava.tryLock(30000)) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
+  try {
+    const n = ordenarTodasAsAbas_(abrirSimulacao_());
+    return (n ? n + ' aba(s) de mês colocada(s) em ordem de data.' : 'Todas as abas de mês já estavam em ordem de data.') +
+      ' Colunas ajustadas ao tamanho do texto e bordas colocadas.';
+  } finally {
+    trava.releaseLock();
+  }
 }
 
 function abaSimulacao_(planilha, nome) {
@@ -461,11 +532,16 @@ function marcaFinal_(marca, desc) {
   return achada || m;
 }
 
+// Data vinda de outra planilha nem sempre passa em "instanceof Date" (é de outro contexto do Apps Script)
+function ehData_(v) {
+  return v instanceof Date || Object.prototype.toString.call(v) === '[object Date]';
+}
+
 // Aceita data do Sheets, "dd/mm/aaaa" ou "aaaa-mm-dd"; recusa data impossível ou no futuro.
 // qualquerAno: aceita também datas antes de 2024 (histórico da planilha original)
 function lerData_(v, qualquerAno) {
   let d = null;
-  if (v instanceof Date && !isNaN(v)) d = new Date(v.getFullYear(), v.getMonth(), v.getDate());
+  if (ehData_(v)) { if (!isNaN(v)) d = new Date(v.getFullYear(), v.getMonth(), v.getDate()); }
   else {
     const t = String(v || '');
     let m = t.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
@@ -524,6 +600,9 @@ const PAINEL_HTML = `<!doctype html>
     <button class="leve" id="analisar" disabled>Análise</button>
     <button class="leve" id="formatar" disabled>Formatação</button>
     <button class="leve" id="ortografia" disabled>Ortografia</button>
+  </div>
+  <div class="botoes">
+    <button class="leve" id="ordenar">Organizar planilha (data, largura e bordas)</button>
   </div>
   <div class="suave" id="msgFerr"></div>
   <div id="analise"></div>
@@ -600,6 +679,7 @@ const PAINEL_HTML = `<!doctype html>
   });
   ferramenta('formatar', 'painelFormatar', 'Arrumando a formatação…', t => $('msgFerr').textContent = t);
   ferramenta('ortografia', 'painelOrtografia', 'Corrigindo a ortografia…', t => $('msgFerr').textContent = t);
+  ferramenta('ordenar', 'painelOrdenar', 'Organizando todas as abas de mês…', t => $('msgFerr').textContent = t);
   const lista = (titulo, itens) => '<h2>' + esc(titulo) + '</h2>' + itens.map(x =>
     '<div class="item"><span>' + esc(x.desc) + (x.comp && x.comp.length ? '<br><span class="comp">' + x.comp.map(esc).join(' + ') + '</span>' : '') +
     '</span><span>' + x.freq + ' · ' + x.peso + '</span></div>').join('');

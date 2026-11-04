@@ -270,7 +270,7 @@ function lerHistorico_() {
       const chave = serial + '|' + (data ? data.getTime() : '') + '|' + semAcento_(desc);
       if (serial && vistos.has(chave)) return;
       vistos.add(chave);
-      linhas.push({ desc, aba: aba.getName(), historica: !!data && data <= HISTORICO_ATE, recente: !!data && data > HISTORICO_ATE });
+      linhas.push({ desc, marca, modelo, aba: aba.getName(), historica: !!data && data <= HISTORICO_ATE, recente: !!data && data > HISTORICO_ATE });
     });
   });
   return { linhas, foraDoApp };
@@ -281,6 +281,7 @@ function montarBanco_(antigo, linhas) {
   const banco = antigo ? JSON.parse(JSON.stringify(antigo)) : bancoVazio_();
   semearBanco_(banco); // não duplica: só cadastra o que falta da lista oficial
   const novos = [], freq = {}, nao = {}, recentes = new Set(), traduzidas = {}, porTraducao = {};
+  const familias = {}, trocasTotal = {}; // compatibilidade: trocas feitas em cada família de modelo
   const oficial = c => { const it = banco.itens['I:' + c.chave]; return !!it && it.origem === ORIGEM_OFICIAL; };
   linhas.forEach(l => {
     const comps = interpretarDescricao_(l.desc);
@@ -307,6 +308,11 @@ function montarBanco_(antigo, linhas) {
       return;
     }
     if (l.historica) freq[item.id] = (freq[item.id] || 0) + 1;
+    // Todas as datas contam para saber que troca já foi feita em que modelo
+    const fam = familiaModelo_(l.marca || '', l.modelo || '');
+    const f = familias[fam] = familias[fam] || { n: 0, t: {} };
+    f.n++;
+    componentesDe_(item, banco).filter(ehTroca_).forEach(t => { f.t[t] = (f.t[t] || 0) + 1; trocasTotal[t] = (trocasTotal[t] || 0) + 1; });
     if (l.recente) recentes.add(item.id);
   });
   const quando = agora_();
@@ -319,6 +325,9 @@ function montarBanco_(antigo, linhas) {
     const pode = it.origem === ORIGEM_OFICIAL || it.origem === ORIGEM_TRADUCAO || recentes.has(id) || it.sorteavel === true;
     if (it.sorteavel !== pode) { it.sorteavel = pode; it.atualizado = quando; }
   });
+  banco.compat = {};
+  Object.keys(familias).filter(k => familias[k].n >= COMPAT_MIN_FAMILIA).forEach(k => { banco.compat[k] = familias[k]; });
+  banco.trocasComuns = Object.keys(trocasTotal).filter(t => trocasTotal[t] >= COMPAT_MIN_TROCA);
   banco.traducoes = Object.keys(traduzidas).sort((a, b) => traduzidas[b].n - traduzidas[a].n).slice(0, MAX_TRADUCOES)
     .map(k => traduzidas[k]);
   banco.naoInterpretadas = {};
@@ -368,6 +377,44 @@ function divisaoDoSorteio_(n) {
   return { comb, ind: n - comb };
 }
 
+// Manutenções que não existem para uma marca (comparação sem acento, vale também dentro de combinações).
+// Para acrescentar outra regra, copie a linha e troque a marca e a manutenção.
+const PROIBIDAS_POR_MARCA = [
+  { marca: /^POSITIVO\b/, manutencao: /\bTROCA D[EOA] TECLADO\b/ } // Positivo não tem troca de teclado
+];
+
+// Compatibilidade aprendida do histórico: numa família de modelo com pelo menos COMPAT_MIN_FAMILIA
+// manutenções, uma troca comum (feita pelo menos COMPAT_MIN_TROCA vezes no geral) que nunca foi feita
+// nessa família é considerada impossível nela (ex.: peça soldada ou que não existe no modelo).
+// Reparos (REPARO NA INTERFACE..., FORMATAÇÃO) servem para qualquer modelo.
+const COMPAT_MIN_FAMILIA = 30;
+const COMPAT_MIN_TROCA = 10;
+
+const ehTroca_ = t => /^TROCA\b/.test(semAcento_(t));
+
+// Família do modelo: marca + primeiro código com número ("POSITIVO DUO C4128B-3" → "POSITIVO C4128")
+function familiaModelo_(marca, modelo) {
+  const m = semAcento_(marca);
+  const base = ((typeof MARCAS_IGUAIS !== 'undefined' && MARCAS_IGUAIS[m]) || m).split(' ')[0];
+  const t = semAcento_(modelo).replace(/^((VISION|DUO|MOTION|ASPIRE|IDEAPAD|INSPIRON|VIVOBOOK|NITRO|SLIM|GRAY|RED|BLUE|NOTEBOOK)\b\s*)+/, '');
+  const c = t.match(/[A-Z]*\d+/);
+  return base + ' ' + (c ? c[0] : t.slice(0, 8));
+}
+
+function componentesDe_(item, banco) {
+  return item.tipo === 'C' ? (item.comp || []).map(c => banco.itens[c] ? banco.itens[c].desc : '') : [item.desc];
+}
+
+// O notebook (marca e modelo) aceita esta manutenção?
+function permitidaPara_(item, nb, banco) {
+  const marca = semAcento_(nb.marca), comps = componentesDe_(item, banco);
+  if (PROIBIDAS_POR_MARCA.some(r => r.marca.test(marca) && comps.concat(item.desc).some(t => r.manutencao.test(semAcento_(t))))) return false;
+  const fam = banco.compat && banco.compat[familiaModelo_(nb.marca || '', nb.modelo || '')];
+  if (!fam) return true; // modelo com pouco histórico: sem restrição
+  const comuns = banco.trocasComuns || [];
+  return !comps.some(t => ehTroca_(t) && !fam.t[t] && comuns.indexOf(t) >= 0);
+}
+
 // Dá uma descrição a cada notebook: primeiro o tipo (70/30), depois o item pelo peso do tipo
 function atribuirDescricoes_(notebooks, banco) {
   const todos = Object.keys(banco.itens).map(id => banco.itens[id]).filter(it => it.sorteavel !== false);
@@ -386,8 +433,17 @@ function atribuirDescricoes_(notebooks, banco) {
   }
   const tipos = new Array(nComb).fill('C').concat(new Array(nInd).fill('I'));
   embaralhar_(tipos);
-  notebooks.forEach((nb, i) => { nb.desc = sortearPorPeso_(tipos[i] === 'C' ? comb : ind).desc; });
-  return { ind: nInd, comb: nComb };
+  let feitosI = 0, feitosC = 0;
+  notebooks.forEach((nb, i) => {
+    const ok = it => permitidaPara_(it, nb, banco);
+    let lista = (tipos[i] === 'C' ? comb : ind).filter(ok);
+    if (!lista.length) lista = ind.concat(comb).filter(ok); // nada permitido no tipo sorteado: usa o outro
+    if (!lista.length) throw new Error('Nenhuma manutenção permitida para ' + nb.marca + ' ' + nb.modelo + '.');
+    const it = sortearPorPeso_(lista);
+    nb.desc = it.desc;
+    if (it.tipo === 'C') feitosC++; else feitosI++;
+  });
+  return { ind: feitosI, comb: feitosC };
 }
 
 // Seriais gravados pelo app (para nunca entrarem no histórico)
@@ -446,7 +502,8 @@ function painelAtualizarBanco() {
   try {
     const r = atualizarBancoSemTrava_(true);
     const l = r.banco.leitura;
-    return 'Banco atualizado: ' + l.linhas + ' linhas lidas, ' + l.novos + ' cadastro(s) novo(s).';
+    return 'Banco atualizado: ' + l.linhas + ' linhas lidas (' + l.historicas + ' até 28/02/2026, que contam nos pesos), ' +
+      l.novos + ' cadastro(s) novo(s).';
   } finally {
     trava.releaseLock();
   }
