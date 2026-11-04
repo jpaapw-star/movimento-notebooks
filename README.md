@@ -43,3 +43,15 @@ frequência histórica, peso, se pode sair no sorteio, data da descoberta, orige
 
 A cada 12 h escreve **só na aba do mês atual** (muda sozinho na virada do mês). Meses antigos só pelo botão
 **Sortear metade** do painel.
+
+## Compatibilidade por modelo
+
+- `PROIBIDAS_POR_MARCA` (em `src/Banco.gs`): manutenção que nunca sai para uma marca (Positivo → TROCA DE TECLADO).
+- Aprendida do histórico: numa família de modelo (marca + primeiro código com número, ex.: `POSITIVO C4128`) com pelo
+  menos 30 manutenções, uma troca comum (10+ vezes no geral) que nunca foi feita nela não sai para esse modelo.
+  Reparos servem para qualquer modelo.
+
+## Organização das abas de mês
+
+A cada rodada (e no botão **Organizar planilha** do painel), todas as abas de mês ficam em ordem de data (também datas
+digitadas com hora), com as colunas do tamanho do texto e bordas em tudo o que está preenchido.
