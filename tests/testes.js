@@ -355,6 +355,32 @@ teste('Inicialização e formatação do sistema são a mesma manutenção', () 
   assert.strictEqual(c.desc, 'FORMATAÇÃO DO SISTEMA E REPARO NA INTERFACE DE ÁUDIO');
 });
 
+teste('Ordenar por data: todas as abas de mês, datas em texto e com hora, sem mudar valores', () => {
+  const amb = cenario({ destino: d => ({
+    'OUTUBRO 2026': [CAB_DESTINO.concat(['OBS']),
+      ['A', 'ACER', 'X', 'S1', d(2026, 10, 22), 'TROCA DE TELA', 'x'],
+      ['B', 'ACER', 'X', 'S2', '31/10/2026 08:57', 'TROCA DE SSD', ''],
+      ['C', 'ACER', 'X', 'S3', d(2026, 10, 13), 'TROCA DE SSD', ''],
+      ['D', 'ACER', 'X', 'S4', '', 'SEM DATA', ''],
+      ['E', 'ACER', 'X', 'S5', '31/10/2026 08:56', 'TROCA DE SSD', ''],
+      ['F', 'ACER', 'X', 'S6', '16/10/2026', 'TROCA DE SSD', '']],
+    'SETEMBRO 2026': [CAB_DESTINO, ['A', 'ACER', 'X', 'T1', d(2026, 9, 20), 'X'], ['B', 'ACER', 'X', 'T2', d(2026, 9, 2), 'X']],
+    'Outra aba': [['DATA'], [d(2026, 9, 20)], [d(2026, 9, 2)]] }) });
+  const p = amb.planilhas[TESTE_ID];
+  p.getSheetByName('OUTUBRO 2026').maxColunas = 7; // sem coluna sobrando: usa coluna temporária
+  const antesOut = p.getSheetByName('OUTUBRO 2026').dados.slice(1).map(l => JSON.stringify(l)).sort();
+  const msg = amb.rodar('painelOrdenar()');
+  assert.ok(/2 aba/.test(msg), msg);
+  const out = p.getSheetByName('OUTUBRO 2026');
+  igual(out.dados.slice(1).map(l => l[3]), ['S3', 'S6', 'S1', 'S5', 'S2', 'S4']);
+  igual(out.dados.slice(1).map(l => JSON.stringify(l.slice(0, 7))).sort(), antesOut, 'valores mudaram');
+  assert.strictEqual(out.getMaxColumns(), 7, 'coluna temporária ficou');
+  assert.ok(out.dados.every(l => l.length <= 7 || l.slice(7).every(x => x === '')), 'sobrou chave');
+  igual(p.getSheetByName('SETEMBRO 2026').dados.slice(1).map(l => l[3]), ['T2', 'T1']);
+  assert.strictEqual(p.getSheetByName('Outra aba').dados[1][0].getDate(), 20, 'mexeu em aba que não é de mês');
+  assert.ok(/já estavam/.test(amb.rodar('painelOrdenar()')));
+});
+
 teste('Painel: consulta ao banco e resumo', () => {
   const amb = cenario();
   amb.rodar('atualizarBancoSemTrava_(true)');

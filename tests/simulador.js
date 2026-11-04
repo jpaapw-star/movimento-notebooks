@@ -59,6 +59,15 @@ function criarAmbiente() {
       linhas.forEach((l, i) => { this.aba.dados[this.r - 1 + i] = l; });
       return this;
     }
+    clearContent() {
+      this.aba.planilha.escrever();
+      for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) {
+        const l = this.aba.dados[this.r - 1 + i];
+        if (l) l[this.c - 1 + j] = '';
+        delete this.aba.formulas[(this.r + i) + ',' + (this.c + j)];
+      }
+      return this;
+    }
     getFontFamily() { return 'Arial'; }
     getFontSize() { return 10; }
   }
@@ -77,7 +86,13 @@ function criarAmbiente() {
       this.dados.forEach(l => (l || []).forEach((x, j) => { if (x !== '' && x !== undefined && x !== null) m = Math.max(m, j + 1); }));
       return m;
     }
-    getRange(r, c, nr, nc) { return new Faixa(this, r, c, nr || 1, nc || 1); }
+    getRange(r, c, nr, nc) {
+      if (c + (nc || 1) - 1 > this.getMaxColumns()) throw new Error('Faixa fora da grade');
+      return new Faixa(this, r, c, nr || 1, nc || 1);
+    }
+    getMaxColumns() { return this.maxColunas || Math.max(this.getLastColumn(), 26); }
+    insertColumnsAfter(c, n) { this.planilha.escrever(); this.maxColunas = this.getMaxColumns() + n; }
+    deleteColumn(c) { this.planilha.escrever(); this.dados.forEach(l => l && l.splice(c - 1, 1)); this.maxColunas = this.getMaxColumns() - 1; }
     getDataRange() { return new Faixa(this, 1, 1, Math.max(this.getLastRow(), 1), Math.max(this.getLastColumn(), 1)); }
     setFrozenRows() { this.planilha.escrever(); }
   }
