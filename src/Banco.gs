@@ -368,6 +368,20 @@ function divisaoDoSorteio_(n) {
   return { comb, ind: n - comb };
 }
 
+// Manutenções que não existem para uma marca (comparação sem acento, vale também dentro de combinações).
+// Para acrescentar outra regra, copie a linha e troque a marca e a manutenção.
+const PROIBIDAS_POR_MARCA = [
+  { marca: /^POSITIVO\b/, manutencao: /\bTROCA D[EOA] TECLADO\b/ } // Positivo não tem troca de teclado
+];
+
+function permitidaPara_(item, marca, banco) {
+  const m = semAcento_(marca);
+  const regras = PROIBIDAS_POR_MARCA.filter(r => r.marca.test(m));
+  if (!regras.length) return true;
+  const textos = [item.desc].concat((item.comp || []).map(c => banco.itens[c] ? banco.itens[c].desc : ''));
+  return !regras.some(r => textos.some(t => r.manutencao.test(semAcento_(t))));
+}
+
 // Dá uma descrição a cada notebook: primeiro o tipo (70/30), depois o item pelo peso do tipo
 function atribuirDescricoes_(notebooks, banco) {
   const todos = Object.keys(banco.itens).map(id => banco.itens[id]).filter(it => it.sorteavel !== false);
@@ -386,8 +400,17 @@ function atribuirDescricoes_(notebooks, banco) {
   }
   const tipos = new Array(nComb).fill('C').concat(new Array(nInd).fill('I'));
   embaralhar_(tipos);
-  notebooks.forEach((nb, i) => { nb.desc = sortearPorPeso_(tipos[i] === 'C' ? comb : ind).desc; });
-  return { ind: nInd, comb: nComb };
+  let feitosI = 0, feitosC = 0;
+  notebooks.forEach((nb, i) => {
+    const ok = it => permitidaPara_(it, nb.marca, banco);
+    let lista = (tipos[i] === 'C' ? comb : ind).filter(ok);
+    if (!lista.length) lista = ind.concat(comb).filter(ok); // nada permitido no tipo sorteado: usa o outro
+    if (!lista.length) throw new Error('Nenhuma manutenção permitida para a marca ' + nb.marca + '.');
+    const it = sortearPorPeso_(lista);
+    nb.desc = it.desc;
+    if (it.tipo === 'C') feitosC++; else feitosI++;
+  });
+  return { ind: feitosI, comb: feitosC };
 }
 
 // Seriais gravados pelo app (para nunca entrarem no histórico)

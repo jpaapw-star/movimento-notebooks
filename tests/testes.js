@@ -389,6 +389,23 @@ teste('Ordenar por data: todas as abas de mês, datas em texto e com hora, sem m
   assert.ok(!p.getSheetByName('Outra aba').bordas, 'bordas em aba que não é de mês');
 });
 
+teste('Positivo nunca recebe TROCA DE TECLADO, nem dentro de combinação', () => {
+  const amb = cenario({ historico: d => [
+    ['A', 'ACER', 'X', 'H1', d(2026, 1, 5), 'TROCA DE TECLADO'],
+    ['A', 'ACER', 'X', 'H2', d(2026, 4, 5), 'TROCA DE TECLADO'],
+    ['A', 'ACER', 'X', 'H3', d(2026, 4, 6), 'TROCA DE SSD E TECLADO']] });
+  amb.rodar('atualizarBancoSemTrava_(true)');
+  const r = amb.rodar(`(() => { const b = lerBanco_();
+    const pos = Array.from({ length: 3000 }, () => ({ marca: 'POSITIVO' }));
+    const acer = Array.from({ length: 3000 }, () => ({ marca: 'ACER' }));
+    const d = atribuirDescricoes_(pos, b); atribuirDescricoes_(acer, b);
+    return { pos: pos.map(x => x.desc), acer: acer.map(x => x.desc), d }; })()`);
+  assert.ok(!r.pos.some(t => /TECLADO/.test(t) && /TROCA/.test(t) && !/REPARO NA INTERFACE DE TECLADO/.test(t)), 'Positivo recebeu troca de teclado');
+  assert.ok(r.acer.some(t => t === 'TROCA DE TECLADO'), 'outras marcas continuam podendo');
+  assert.ok(r.acer.some(t => t === 'TROCA DE SSD E TECLADO'));
+  assert.strictEqual(r.d.ind + r.d.comb, 3000);
+});
+
 teste('Painel: consulta ao banco e resumo', () => {
   const amb = cenario();
   amb.rodar('atualizarBancoSemTrava_(true)');
