@@ -383,6 +383,10 @@ teste('Ordenar por data: todas as abas de mês, datas em texto e com hora, sem m
   const l = out.larguras;
   assert.ok(l[6] > l[1], 'DESCRIÇÃO deveria ser mais larga que TÉCNICO');
   assert.strictEqual(l[1], 7 * 'TÉCNICO'.length + 10 + 16);
+  // bordas em tudo o que está preenchido: cabeçalho + 6 linhas x 7 colunas, todos os lados
+  const b = out.bordas[out.bordas.length - 1];
+  igual({ r: b.r, c: b.c, nr: b.nr, nc: b.nc, lados: b.lados }, { r: 1, c: 1, nr: 7, nc: 7, lados: [true, true, true, true, true, true] });
+  assert.ok(!p.getSheetByName('Outra aba').bordas, 'bordas em aba que não é de mês');
 });
 
 teste('Painel: consulta ao banco e resumo', () => {

@@ -345,11 +345,19 @@ function ajustarLarguras_(aba) {
   for (let c = 1; c <= n; c++) aba.setColumnWidth(c, aba.getColumnWidth(c) + FOLGA_COLUNA);
 }
 
-// Ordena por data e ajusta a largura das colunas em todas as abas de mês. Devolve quantas mudaram de ordem.
+// Todas as bordas (por fora e entre as células) em tudo o que está preenchido, do cabeçalho à última linha
+function colocarBordas_(aba) {
+  const largura = aba.getLastColumn();
+  if (!largura) return;
+  const ultima = ultimaLinhaComDados_(aba, largura);
+  aba.getRange(1, 1, ultima, largura).setBorder(true, true, true, true, true, true);
+}
+
+// Ordena por data, ajusta a largura das colunas e coloca as bordas em todas as abas de mês. Devolve quantas mudaram de ordem.
 function ordenarTodasAsAbas_(planilha) {
   const abas = planilha.getSheets().filter(a => ehAbaDeMes_(a.getName()));
   const n = abas.filter(ordenarPorData_).length;
-  abas.forEach(ajustarLarguras_);
+  abas.forEach(a => { ajustarLarguras_(a); colocarBordas_(a); });
   return n;
 }
 
@@ -360,7 +368,7 @@ function painelOrdenar() {
   try {
     const n = ordenarTodasAsAbas_(abrirSimulacao_());
     return (n ? n + ' aba(s) de mês colocada(s) em ordem de data.' : 'Todas as abas de mês já estavam em ordem de data.') +
-      ' Colunas ajustadas ao tamanho do texto.';
+      ' Colunas ajustadas ao tamanho do texto e bordas colocadas.';
   } finally {
     trava.releaseLock();
   }
@@ -589,7 +597,7 @@ const PAINEL_HTML = `<!doctype html>
     <button class="leve" id="ortografia" disabled>Ortografia</button>
   </div>
   <div class="botoes">
-    <button class="leve" id="ordenar">Organizar planilha (data e largura)</button>
+    <button class="leve" id="ordenar">Organizar planilha (data, largura e bordas)</button>
   </div>
   <div class="suave" id="msgFerr"></div>
   <div id="analise"></div>

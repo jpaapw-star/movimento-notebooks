@@ -68,6 +68,11 @@ function criarAmbiente() {
       }
       return this;
     }
+    setBorder(...lados) {
+      this.aba.planilha.escrever();
+      (this.aba.bordas = this.aba.bordas || []).push({ r: this.r, c: this.c, nr: this.nr, nc: this.nc, lados });
+      return this;
+    }
     getFontFamily() { return 'Arial'; }
     getFontSize() { return 10; }
   }
