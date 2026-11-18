@@ -162,3 +162,11 @@ function conferirScan_(meses) {
     trava.releaseLock();
   }
 }
+
+// Rode esta função uma vez pelo editor do Apps Script (botão Executar) para o Google pedir
+// a permissão de acesso externo que a Memória Global precisa. Depois disso o automático usa a mesma permissão.
+function autorizarPermissoes() {
+  UrlFetchApp.fetch('https://www.google.com', { muteHttpExceptions: true });
+  props_().deleteProperty('ERRO_MG');
+  return 'Permissões concedidas.';
+}
