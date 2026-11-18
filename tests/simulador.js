@@ -17,6 +17,11 @@ function criarAmbiente() {
 
   class Faixa {
     constructor(aba, r, c, nr, nc) { Object.assign(this, { aba, r, c, nr, nc }); }
+    // Colunas protegidas (aba.protegidas = [8]) recusam escrita, como no Google
+    protegida_() {
+      if ((this.aba.protegidas || []).some(k => k >= this.c && k < this.c + this.nc))
+        throw new Error('Você está tentando editar uma célula ou um objeto protegido.');
+    }
     getValues() {
       const v = [];
       for (let i = 0; i < this.nr; i++) {
@@ -40,7 +45,7 @@ function criarAmbiente() {
       return v;
     }
     setValues(v) {
-      this.aba.planilha.escrever();
+      this.aba.planilha.escrever(); this.protegida_();
       if (v.length !== this.nr || v.some(l => l.length !== this.nc)) throw new Error('setValues: tamanho errado');
       v.forEach((l, i) => l.forEach((x, j) => {
         const r = this.r + i, c = this.c + j;
@@ -52,7 +57,7 @@ function criarAmbiente() {
       return this;
     }
     sort(o) {
-      this.aba.planilha.escrever();
+      this.aba.planilha.escrever(); this.protegida_();
       const linhas = this.aba.dados.slice(this.r - 1, this.r - 1 + this.nr);
       const k = o.column - 1;
       linhas.sort((a, b) => (a[k] > b[k] ? 1 : a[k] < b[k] ? -1 : 0) * (o.ascending ? 1 : -1));
@@ -60,7 +65,7 @@ function criarAmbiente() {
       return this;
     }
     clearContent() {
-      this.aba.planilha.escrever();
+      this.aba.planilha.escrever(); this.protegida_();
       for (let i = 0; i < this.nr; i++) for (let j = 0; j < this.nc; j++) {
         const l = this.aba.dados[this.r - 1 + i];
         if (l) l[this.c - 1 + j] = '';
@@ -69,7 +74,7 @@ function criarAmbiente() {
       return this;
     }
     setBorder(...lados) {
-      this.aba.planilha.escrever();
+      this.aba.planilha.escrever(); this.protegida_();
       (this.aba.bordas = this.aba.bordas || []).push({ r: this.r, c: this.c, nr: this.nr, nc: this.nc, lados });
       return this;
     }
@@ -77,7 +82,7 @@ function criarAmbiente() {
     getFontSize() { return 10; }
   }
   ['setNumberFormat', 'setFontWeight', 'setHorizontalAlignment', 'setVerticalAlignment', 'setFontFamily', 'setFontSize']
-    .forEach(m => { Faixa.prototype[m] = function () { this.aba.planilha.escrever(); return this; }; });
+    .forEach(m => { Faixa.prototype[m] = function () { this.aba.planilha.escrever(); this.protegida_(); return this; }; });
 
   class Aba {
     constructor(planilha, nome, dados) { Object.assign(this, { planilha, nome, dados: dados || [], formulas: {} }); }

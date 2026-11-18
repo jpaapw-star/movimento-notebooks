@@ -354,10 +354,23 @@ function colocarBordas_(aba) {
 }
 
 // Ordena por data, ajusta a largura das colunas e coloca as bordas em todas as abas de mês. Devolve quantas mudaram de ordem.
+// Uma aba com proteção (ou outro erro) é pulada e anotada no log; as outras continuam.
+// Devolve quantas abas mudaram de ordem; as puladas ficam em ordenarTodasAsAbas_.puladas.
 function ordenarTodasAsAbas_(planilha) {
   const abas = planilha.getSheets().filter(a => ehAbaDeMes_(a.getName()));
-  const n = abas.filter(ordenarPorData_).length;
-  abas.forEach(a => { ajustarLarguras_(a); colocarBordas_(a); });
+  let n = 0;
+  const puladas = [];
+  abas.forEach(a => {
+    try {
+      if (ordenarPorData_(a)) n++;
+      ajustarLarguras_(a);
+      colocarBordas_(a);
+    } catch (e) {
+      puladas.push(a.getName());
+      registrarLog_('AVISO', 'Aba "' + a.getName() + '" não foi organizada: ' + ((e && e.message) || e));
+    }
+  });
+  ordenarTodasAsAbas_.puladas = puladas;
   return n;
 }
 
@@ -367,8 +380,10 @@ function painelOrdenar() {
   if (!trava.tryLock(30000)) throw new Error('Outra rodada está em andamento. Tente de novo em 1 minuto.');
   try {
     const n = ordenarTodasAsAbas_(abrirSimulacao_());
+    const puladas = ordenarTodasAsAbas_.puladas || [];
     return (n ? n + ' aba(s) de mês colocada(s) em ordem de data.' : 'Todas as abas de mês já estavam em ordem de data.') +
-      ' Colunas ajustadas ao tamanho do texto e bordas colocadas.';
+      ' Colunas ajustadas ao tamanho do texto e bordas colocadas.' +
+      (puladas.length ? ' Puladas por estarem protegidas: ' + puladas.join(', ') + '.' : '');
   } finally {
     trava.releaseLock();
   }

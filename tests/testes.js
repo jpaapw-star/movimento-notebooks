@@ -455,5 +455,21 @@ teste('Propriedades: banco grande cabe no limite de 9 KB por pedaço (acentos)',
   assert.strictEqual(amb.rodar(`lerBanco_().itens['I:7'].desc`), 'REPARO NA INTERFACE DE ÁÉÍÓÚ ÇÃÕ 7');
 });
 
+teste('Aba de mês protegida é pulada: o sorteio grava e as outras abas são organizadas', () => {
+  const amb = cenario({ destino: d => ({
+    'FEVEREIRO 2026': [CAB_DESTINO, ['X', 'ACER', 'A', 'F2', d(2026, 2, 9), 'A'], ['X', 'ACER', 'A', 'F1', d(2026, 2, 3), 'B']],
+    'OUTUBRO 2026': [CAB_DESTINO, ['X', 'ACER', 'A', 'O2', d(2026, 10, 9), 'A'], ['X', 'ACER', 'A', 'O1', d(2026, 10, 3), 'B']]
+  }) });
+  const p = amb.planilhas[TESTE_ID];
+  p.getSheetByName('FEVEREIRO 2026').protegidas = [7]; // coluna G protegida, como na planilha real (lá é a H)
+  const n = amb.rodar(`gerar_(['NOVEMBRO 2026'], true)`);
+  assert.ok(n > 0, 'sorteou');
+  assert.strictEqual(amb.rodar('JSON.parse(props_().getProperty("ULTIMA_RODADA")).erro'), '');
+  assert.strictEqual(p.getSheetByName('OUTUBRO 2026').dados[1][3], 'O1', 'outubro foi ordenado');
+  assert.strictEqual(p.getSheetByName('FEVEREIRO 2026').dados[1][3], 'F2', 'fevereiro ficou como estava');
+  assert.ok(/FEVEREIRO 2026/.test(amb.rodar('painelOrdenar()')));
+  assert.ok(amb.rodar('lerGrande_("LOG")').some(l => /FEVEREIRO 2026/.test(l.msg)));
+});
+
 console.log('\n' + ok + ' passaram, ' + falhas + ' falharam');
 process.exit(falhas ? 1 : 0);
